@@ -1,13 +1,18 @@
 //! Direct TCP RAW printing and HQES status check.
 //! Ported from reference/desktop/src/main.js `print-text` / `get-printer-config`.
+//! Also keeps short-lived TCP sessions for Browser Print write→read flows.
 
 use crate::config::PrinterInfo;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
+const READ_TIMEOUT: Duration = Duration::from_millis(250);
+const SESSION_IDLE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,13 +24,113 @@ pub struct PrinterStatus {
     pub warning_messages: Vec<String>,
 }
 
-pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), String> {
+struct DeviceSession {
+    stream: TcpStream,
+    last_used: Instant,
+}
+
+/// Open TCP sessions keyed by Browser Print device uid (write then read).
+#[derive(Default)]
+pub struct DeviceSessionPool {
+    inner: Mutex<HashMap<String, DeviceSession>>,
+}
+
+impl DeviceSessionPool {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn purge_idle(map: &mut HashMap<String, DeviceSession>) {
+        map.retain(|_, s| s.last_used.elapsed() < SESSION_IDLE);
+    }
+
+    pub fn write(&self, uid: &str, printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
+        let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+        Self::purge_idle(&mut map);
+
+        if let Some(session) = map.get_mut(uid) {
+            match session.stream.write_all(data).and_then(|_| session.stream.flush()) {
+                Ok(()) => {
+                    session.last_used = Instant::now();
+                    return Ok(());
+                }
+                Err(_) => {
+                    map.remove(uid);
+                }
+            }
+        }
+
+        let mut stream = connect_printer(printer)?;
+        stream
+            .write_all(data)
+            .map_err(|e| format!("Failed writing to printer: {e}"))?;
+        let _ = stream.flush();
+        map.insert(
+            uid.to_string(),
+            DeviceSession {
+                stream,
+                last_used: Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn read(&self, uid: &str, printer: &PrinterInfo) -> Result<String, String> {
+        let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+        Self::purge_idle(&mut map);
+
+        if !map.contains_key(uid) {
+            // Open a fresh connection so a lone /read still returns something (often empty).
+            let stream = connect_printer(printer)?;
+            map.insert(
+                uid.to_string(),
+                DeviceSession {
+                    stream,
+                    last_used: Instant::now(),
+                },
+            );
+        }
+
+        let session = map.get_mut(uid).ok_or_else(|| "Session missing".to_string())?;
+        let _ = session.stream.set_read_timeout(Some(READ_TIMEOUT));
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            match session.stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf.extend_from_slice(&chunk[..n]);
+                    if buf.len() > 65536 {
+                        break;
+                    }
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        session.last_used = Instant::now();
+        Ok(String::from_utf8_lossy(&buf).into_owned())
+    }
+}
+
+fn connect_printer(printer: &PrinterInfo) -> Result<TcpStream, String> {
     let addr: SocketAddr = format!("{}:{}", printer.address, printer.print_port)
         .parse()
         .map_err(|e| format!("Invalid printer address: {e}"))?;
-
-    let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
+    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .map_err(|e| format!("Could not connect to printer: {e}"))?;
+    let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
+    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+    Ok(stream)
+}
+
+pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), String> {
+    let mut stream = connect_printer(printer)?;
     stream
         .set_write_timeout(Some(IO_TIMEOUT))
         .map_err(|e| e.to_string())?;
@@ -62,7 +167,6 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
 
             let mut buf = Vec::new();
             let mut chunk = [0u8; 2048];
-            // Read until timeout / close (best-effort, mirrors desktop finalize timeout).
             loop {
                 match stream.read(&mut chunk) {
                     Ok(0) => break,
@@ -86,7 +190,6 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
             status
         }
         Err(_) => {
-            // Fallback: try config port 8080 like desktop app
             let config_addr: Result<SocketAddr, _> =
                 format!("{}:8080", printer.address).parse();
             if let Ok(config_addr) = config_addr {
@@ -101,9 +204,6 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
     }
 }
 
-/// Minimal HQES decode: look for ERRORS/WARNINGS hex flags in the response text.
-/// Full bit maps from desktop are large; we surface non-zero flags as generic messages
-/// and also pass through known keyword lines when present.
 fn decode_hqes(response: &str) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -129,13 +229,10 @@ fn decode_hqes(response: &str) -> (Vec<String>, Vec<String>) {
 }
 
 fn extract_hex_flags(line: &str) -> Option<u32> {
-    // Prefer the last hex-looking token on the line.
-    line.split_whitespace()
-        .rev()
-        .find_map(|tok| {
-            let t = tok.trim_start_matches("0x").trim_start_matches("0X");
-            u32::from_str_radix(t, 16).ok()
-        })
+    line.split_whitespace().rev().find_map(|tok| {
+        let t = tok.trim_start_matches("0x").trim_start_matches("0X");
+        u32::from_str_radix(t, 16).ok()
+    })
 }
 
 #[cfg(test)]

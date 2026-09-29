@@ -4,9 +4,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 const els = {
   listenAddress: document.getElementById("listenAddress"),
   port: document.getElementById("port"),
+  browserPrintCompatible: document.getElementById("browserPrintCompatible"),
   httpStatus: document.getElementById("httpStatus"),
   saveHttpBtn: document.getElementById("saveHttpBtn"),
-  defaultPrinter: document.getElementById("defaultPrinter"),
+  savedList: document.getElementById("savedList"),
   searchBtn: document.getElementById("searchBtn"),
   testStatusBtn: document.getElementById("testStatusBtn"),
   testPrintBtn: document.getElementById("testPrintBtn"),
@@ -15,7 +16,6 @@ const els = {
   manualAddress: document.getElementById("manualAddress"),
   manualPort: document.getElementById("manualPort"),
   addManualBtn: document.getElementById("addManualBtn"),
-  addedList: document.getElementById("addedList"),
   launchAtLogin: document.getElementById("launchAtLogin"),
   apiUrl: document.getElementById("apiUrl"),
 };
@@ -37,6 +37,10 @@ function displayName(p) {
   return p.address;
 }
 
+function defaultAddress() {
+  return currentConfig?.defaultPrinter?.address ?? null;
+}
+
 function updateApiUrl() {
   const host = els.listenAddress.value.trim() || "127.0.0.1";
   const port = els.port.value || "9100";
@@ -52,40 +56,81 @@ async function refreshHttpStatus() {
   }
 }
 
-function renderDefaultPrinter(printer, statusHtml = "") {
-  if (!printer) {
-    els.defaultPrinter.classList.add("muted");
-    els.defaultPrinter.textContent = "No default printer selected";
-    return;
-  }
-  els.defaultPrinter.classList.remove("muted");
-  els.defaultPrinter.innerHTML = `
-    <strong>${escapeHtml(displayName(printer))}</strong><br />
-    Model: ${escapeHtml(printer.model)}<br />
-    IP: ${escapeHtml(printer.address)}<br />
-    Print port: ${escapeHtml(printer.printPort)}
-    ${statusHtml}
-  `;
-}
-
-function renderAdded(list) {
+function renderSaved(list) {
   if (!list?.length) {
-    els.addedList.innerHTML = "";
+    els.savedList.innerHTML = `<div class="printer-card muted">No saved printers yet. Search on LAN or add manually.</div>`;
     return;
   }
-  els.addedList.innerHTML = list
-    .map(
-      (p) => `
-      <div class="added-item">
-        <span>${escapeHtml(displayName(p))} — ${escapeHtml(p.address)}:${escapeHtml(p.printPort)}</span>
-        <button type="button" data-remove="${escapeHtml(p.address)}">Remove</button>
-      </div>`
-    )
+
+  const def = defaultAddress();
+  els.savedList.innerHTML = list
+    .map((p) => {
+      const isDefault = p.address === def;
+      const nameValue = p.name?.trim() ? p.name : "";
+      return `
+      <div class="saved-card" data-address="${escapeHtml(p.address)}">
+        <div class="saved-header">
+          <strong>${escapeHtml(displayName(p))}</strong>
+          ${isDefault ? `<span class="badge ok">Default</span>` : ""}
+          ${p.model && p.model !== "Manual" ? `<span class="badge neutral">${escapeHtml(p.model)}</span>` : ""}
+        </div>
+        <div class="row">
+          <label>Name</label>
+          <input type="text" data-field="name" value="${escapeHtml(nameValue)}" placeholder="${escapeHtml(p.model || p.address)}" />
+        </div>
+        <div class="row">
+          <label>Address</label>
+          <input type="text" data-field="address" value="${escapeHtml(p.address)}" />
+        </div>
+        <div class="row">
+          <label>Print port</label>
+          <input type="number" data-field="printPort" min="1" max="65535" value="${escapeHtml(p.printPort)}" />
+        </div>
+        <div class="button-row">
+          <button type="button" data-action="save">Save changes</button>
+          ${isDefault ? "" : `<button type="button" class="primary" data-action="default">Set as default</button>`}
+          <button type="button" data-action="remove">Remove</button>
+        </div>
+      </div>`;
+    })
     .join("");
 
-  els.addedList.querySelectorAll("[data-remove]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      currentConfig = await invoke("remove_added_printer", { address: btn.dataset.remove });
+  els.savedList.querySelectorAll(".saved-card").forEach((card) => {
+    const originalAddress = card.dataset.address;
+
+    card.querySelector('[data-action="save"]').addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        currentConfig = await invoke("update_printer", {
+          originalAddress,
+          name: card.querySelector('[data-field="name"]').value.trim(),
+          address: card.querySelector('[data-field="address"]').value.trim(),
+          printPort: Number(card.querySelector('[data-field="printPort"]').value) || 9100,
+        });
+        applyConfig(currentConfig);
+      } catch (err) {
+        alert(String(err));
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    const defaultBtn = card.querySelector('[data-action="default"]');
+    if (defaultBtn) {
+      defaultBtn.addEventListener("click", async () => {
+        const printer = (currentConfig.addedPrinters || []).find(
+          (p) => p.address === originalAddress
+        );
+        if (!printer) return;
+        currentConfig = await invoke("set_default_printer", { printer });
+        applyConfig(currentConfig);
+      });
+    }
+
+    card.querySelector('[data-action="remove"]').addEventListener("click", async () => {
+      if (!confirm(`Remove printer ${originalAddress}?`)) return;
+      currentConfig = await invoke("remove_added_printer", { address: originalAddress });
       applyConfig(currentConfig);
     });
   });
@@ -96,9 +141,18 @@ function applyConfig(config) {
   els.listenAddress.value = config.listenAddress ?? "127.0.0.1";
   els.port.value = config.port ?? 9100;
   els.launchAtLogin.checked = !!config.launchAtLogin;
-  renderDefaultPrinter(config.defaultPrinter);
-  renderAdded(config.addedPrinters || []);
+  els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
+  renderSaved(config.addedPrinters || []);
   updateApiUrl();
+}
+
+async function persistSettings() {
+  return invoke("save_settings", {
+    listenAddress: els.listenAddress.value.trim() || "127.0.0.1",
+    port: Number(els.port.value) || 9100,
+    launchAtLogin: els.launchAtLogin.checked,
+    browserPrintCompatible: els.browserPrintCompatible.checked,
+  });
 }
 
 async function load() {
@@ -110,11 +164,7 @@ async function load() {
 els.saveHttpBtn.addEventListener("click", async () => {
   els.saveHttpBtn.disabled = true;
   try {
-    currentConfig = await invoke("save_settings", {
-      listenAddress: els.listenAddress.value.trim() || "127.0.0.1",
-      port: Number(els.port.value) || 9100,
-      launchAtLogin: els.launchAtLogin.checked,
-    });
+    currentConfig = await persistSettings();
     applyConfig(currentConfig);
     await refreshHttpStatus();
   } catch (e) {
@@ -126,11 +176,15 @@ els.saveHttpBtn.addEventListener("click", async () => {
 
 els.launchAtLogin.addEventListener("change", async () => {
   try {
-    currentConfig = await invoke("save_settings", {
-      listenAddress: els.listenAddress.value.trim() || "127.0.0.1",
-      port: Number(els.port.value) || 9100,
-      launchAtLogin: els.launchAtLogin.checked,
-    });
+    currentConfig = await persistSettings();
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+els.browserPrintCompatible.addEventListener("change", async () => {
+  try {
+    currentConfig = await persistSettings();
   } catch (e) {
     console.error(e);
   }
@@ -163,16 +217,16 @@ els.searchBtn.addEventListener("click", async () => {
         </p>
         <div class="button-row">
           <button type="button" data-test-idx="${idx}">Test connection</button>
-          <button type="button" class="primary" data-set-idx="${idx}">Set as default</button>
+          <button type="button" class="primary" data-save-idx="${idx}">Save &amp; set default</button>
         </div>
         <div class="conn-status" data-status-idx="${idx}"></div>
       </div>`
       )
       .join("");
 
-    els.searchResults.querySelectorAll("[data-set-idx]").forEach((btn) => {
+    els.searchResults.querySelectorAll("[data-save-idx]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        const printer = lastDiscovered[Number(btn.dataset.setIdx)];
+        const printer = lastDiscovered[Number(btn.dataset.saveIdx)];
         currentConfig = await invoke("set_default_printer", { printer });
         applyConfig(currentConfig);
         els.searchResults.classList.add("hidden");
@@ -229,22 +283,22 @@ function statusBadge(status) {
 }
 
 els.testStatusBtn.addEventListener("click", async () => {
-  if (!currentConfig?.defaultPrinter) return;
+  if (!currentConfig?.defaultPrinter) {
+    alert("No default printer selected.");
+    return;
+  }
   els.testStatusBtn.disabled = true;
-  renderDefaultPrinter(
-    currentConfig.defaultPrinter,
-    `<div style="margin-top:6px"><span class="badge neutral">Testing…</span></div>`
-  );
   try {
     const status = await invoke("check_printer_status", {
       printer: currentConfig.defaultPrinter,
     });
-    renderDefaultPrinter(currentConfig.defaultPrinter, statusBadge(status));
-  } catch (e) {
-    renderDefaultPrinter(
-      currentConfig.defaultPrinter,
-      `<div style="margin-top:6px"><span class="badge bad">${escapeHtml(String(e))}</span></div>`
+    alert(
+      status.status === "online"
+        ? `Default printer online${status.warningMessages?.length ? `: ${status.warningMessages.join(", ")}` : "."}`
+        : `Default printer offline${status.errorMessages?.length ? `: ${status.errorMessages.join(", ")}` : "."}`
     );
+  } catch (e) {
+    alert(String(e));
   } finally {
     els.testStatusBtn.disabled = false;
   }

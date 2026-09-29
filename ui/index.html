@@ -23,17 +23,32 @@
           <label for="port">Port</label>
           <input id="port" type="number" min="1" max="65535" value="9100" />
         </div>
+        <label class="checkbox">
+          <input type="checkbox" id="browserPrintCompatible" checked />
+          Compatible mode (Zebra Browser Print API)
+        </label>
+        <p class="hint">
+          Enables <code>/available</code>, <code>/default</code>, <code>/write</code>,
+          <code>/read</code>, <code>/config</code> so BrowserPrint.js works as a drop-in.
+        </p>
         <p class="status" id="httpStatus">Status: …</p>
         <button type="button" class="primary" id="saveHttpBtn">Save &amp; apply</button>
       </section>
 
       <section class="block">
-        <h2>Default printer</h2>
-        <div id="defaultPrinter" class="printer-card muted">No default printer selected</div>
+        <h2>Saved printers</h2>
+        <p class="hint">All printers kept for the API. Edit name/IP, set default, or remove.</p>
+        <div id="savedList" class="saved-list"></div>
+        <div class="button-row">
+          <button type="button" id="testStatusBtn">Check default status</button>
+          <button type="button" id="testPrintBtn">Test print (default)</button>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Search on LAN</h2>
         <div class="button-row">
           <button type="button" id="searchBtn">Search Zebra printers</button>
-          <button type="button" id="testStatusBtn">Check status</button>
-          <button type="button" id="testPrintBtn">Test print</button>
         </div>
         <div id="searchResults" class="search-results hidden"></div>
       </section>
@@ -53,7 +68,6 @@
           <input id="manualPort" type="number" min="1" max="65535" value="9100" />
         </div>
         <button type="button" id="addManualBtn">Add &amp; set as default</button>
-        <div id="addedList" class="added-list"></div>
       </section>
 
       <section class="block">

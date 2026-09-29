@@ -30,6 +30,7 @@ async fn save_settings(
     listen_address: String,
     port: u16,
     launch_at_login: bool,
+    browser_print_compatible: bool,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
     {
@@ -38,6 +39,7 @@ async fn save_settings(
         cfg.listen_address = listen_address;
         cfg.port = port;
         cfg.launch_at_login = launch_at_login;
+        cfg.browser_print_compatible = browser_print_compatible;
         drop(cfg);
         state.persist().await?;
         if restart_needed {
@@ -75,7 +77,7 @@ async fn set_default_printer(
 ) -> Result<AppConfig, String> {
     {
         let mut cfg = state.config.write().await;
-        cfg.default_printer = Some(printer);
+        cfg.upsert_printer(printer, true);
     }
     state.persist().await?;
     Ok(state.config.read().await.clone())
@@ -107,10 +109,32 @@ async fn add_manual_printer(
     };
     {
         let mut cfg = state.config.write().await;
-        cfg.added_printers
-            .retain(|p| p.address != printer.address);
-        cfg.added_printers.push(printer.clone());
-        cfg.default_printer = Some(printer);
+        cfg.upsert_printer(printer, true);
+    }
+    state.persist().await?;
+    Ok(state.config.read().await.clone())
+}
+
+#[tauri::command]
+async fn update_printer(
+    state: tauri::State<'_, Arc<AppState>>,
+    original_address: String,
+    name: String,
+    address: String,
+    print_port: u16,
+) -> Result<AppConfig, String> {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.update_printer(
+            &original_address,
+            if name.trim().is_empty() {
+                None
+            } else {
+                Some(name)
+            },
+            address,
+            print_port,
+        )?;
     }
     state.persist().await?;
     Ok(state.config.read().await.clone())
@@ -123,15 +147,7 @@ async fn remove_added_printer(
 ) -> Result<AppConfig, String> {
     {
         let mut cfg = state.config.write().await;
-        cfg.added_printers.retain(|p| p.address != address);
-        if cfg
-            .default_printer
-            .as_ref()
-            .map(|p| p.address == address)
-            .unwrap_or(false)
-        {
-            cfg.default_printer = None;
-        }
+        cfg.remove_printer(&address);
     }
     state.persist().await?;
     Ok(state.config.read().await.clone())
@@ -212,6 +228,28 @@ pub fn run() {
                 }
             });
 
+            // Background LAN discovery so Browser Print /available is populated
+            let state_for_discovery = state.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let enabled = state_for_discovery
+                        .config
+                        .read()
+                        .await
+                        .browser_print_compatible;
+                    if enabled {
+                        match tauri::async_runtime::spawn_blocking(search_zebra_printers).await {
+                            Ok(Ok(printers)) => {
+                                *state_for_discovery.discovered.write().await = printers;
+                            }
+                            Ok(Err(e)) => tracing::warn!("Discovery failed: {e}"),
+                            Err(e) => tracing::warn!("Discovery task failed: {e}"),
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+                }
+            });
+
             // Sync autostart with saved preference
             {
                 use tauri_plugin_autostart::ManagerExt;
@@ -229,6 +267,7 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .icon_as_template(true)
                 .menu(&menu)
                 .tooltip("RawLabelPrint")
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -268,6 +307,7 @@ pub fn run() {
             discover_printers,
             set_default_printer,
             add_manual_printer,
+            update_printer,
             remove_added_printer,
             check_printer_status,
             test_print

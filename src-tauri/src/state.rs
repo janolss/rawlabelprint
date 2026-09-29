@@ -1,5 +1,6 @@
 use crate::config::{save_config, AppConfig, PrinterInfo};
 use crate::http_server::{start_http_server, HttpServerHandle, HttpSharedState};
+use crate::print::DeviceSessionPool;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -8,6 +9,7 @@ pub struct AppState {
     pub app_data_dir: PathBuf,
     pub config: Arc<RwLock<AppConfig>>,
     pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
+    pub sessions: Arc<DeviceSessionPool>,
     pub http: Mutex<Option<HttpServerHandle>>,
     pub http_status: Mutex<String>,
 }
@@ -18,6 +20,7 @@ impl AppState {
             app_data_dir,
             config: Arc::new(RwLock::new(config)),
             discovered: Arc::new(RwLock::new(Vec::new())),
+            sessions: Arc::new(DeviceSessionPool::new()),
             http: Mutex::new(None),
             http_status: Mutex::new("stopped".into()),
         }
@@ -27,6 +30,7 @@ impl AppState {
         HttpSharedState {
             config: self.config.clone(),
             discovered: self.discovered.clone(),
+            sessions: self.sessions.clone(),
         }
     }
 

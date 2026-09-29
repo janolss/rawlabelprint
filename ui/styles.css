@@ -129,6 +129,17 @@ button:disabled {
   color: var(--muted);
 }
 
+.hint {
+  margin: 6px 0 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.hint code {
+  font-size: 0.78rem;
+}
+
 .printer-card {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -210,6 +221,28 @@ button:disabled {
   margin-top: 10px;
   display: grid;
   gap: 6px;
+}
+
+.saved-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.saved-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.saved-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
 }
 
 .added-item {
