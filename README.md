@@ -1,26 +1,103 @@
 # RawLabelPrint
 
-Raw Label Print allows sending raw data directly to local printers through http://localhost:9100 (configurable). The intended use-case is label printing from a browser and the application is createad because i needed to replace [Zebra Browser Print](https://www.zebra.com/us/en/products/software/barcode-printers/link-os/browser-print.html) on Apple Silicon.
+macOS (Apple Silicon) tray app that replaces [Zebra Browser Print](https://www.zebra.com/us/en/products/software/barcode-printers/link-os/browser-print.html) for browser-based raw label printing.
 
-## Quick Start Instructions
+The app:
 
-Get list of available printers (GET):
+- Lives in the menu bar (tray)
+- Exposes a localhost HTTP API (default `http://127.0.0.1:9100`)
+- Discovers Zebra printers on the LAN via UDP broadcast on port **4201** (Browser Print protocol)
+- Sends raw data (**ZPL/EPL/…**) **directly over TCP** to the printer print port (default **9100**) — not via CUPS
+
+## Quick start (API)
+
+List printers (GET):
+
 ```
-http://localhost:9100
+http://127.0.0.1:9100/
 ```
 
-Send print data to printer (GET):
-```
-http://localhost:9100/?printer=printer1&data=rawdata
+Response shape (compatible with the RawPrint Windows service):
+
+```json
+[{ "Name": "ZD421 (192.168.1.50)" }]
 ```
 
-Send data to printer (POST):
-```
-endpoint: http://localhost:9100/
+Print (GET):
 
-body:
+```
+http://127.0.0.1:9100/?printer=ZD421%20(192.168.1.50)&data=^XA...^XZ
+```
+
+Print (POST):
+
+```json
 {
-  "printer": "printer1",
-  "data": "rawlabeldata"
+  "printer": "ZD421 (192.168.1.50)",
+  "data": "^XA^FO50,50^A0N,40,40^FDHello^FS^XZ"
 }
 ```
+
+If `printer` is omitted/empty, the **default printer** selected in Settings is used.
+
+CORS: `Access-Control-Allow-Origin: *`
+
+Open `test/index.html` in a browser for a simple interactive test page.
+
+## Configure (Settings)
+
+1. Launch **RawLabelPrint** (menu bar icon appears).
+2. Click the tray icon (or **Settings…**).
+3. Click **Search Zebra printers**, wait ~5 seconds, then **Set as default**.
+4. Optionally add a printer manually (name, IP, print port).
+5. Adjust HTTP bind address/port if needed and **Save & apply**.
+6. Optional: enable **Launch at login**.
+
+Config is stored at:
+
+`~/Library/Application Support/se.rawlabelprint.app/config.json`
+
+## Develop (on a Mac)
+
+Prerequisites: Node.js 20+, Rust (stable), Xcode command line tools.
+
+```bash
+npm install
+npm run tauri dev
+```
+
+## Build DMG for Apple Silicon
+
+On an Apple Silicon Mac:
+
+```bash
+npm install
+npm run tauri build
+```
+
+Artifacts:
+
+- `src-tauri/target/release/bundle/macos/RawLabelPrint.app`
+- `src-tauri/target/release/bundle/dmg/RawLabelPrint_*.dmg`
+
+### Signing / notarization (recommended for distribution)
+
+1. Apple Developer ID Application certificate
+2. Configure Tauri signing env vars (`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, …) — see [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/)
+3. Rebuild; Gatekeeper will accept the notarized DMG
+
+Without notarization: distribute the DMG and instruct users to **right-click → Open** the first time (or allow under System Settings → Privacy & Security). macOS may also ask for **Local Network** permission (required for UDP discovery / TCP print).
+
+## Project layout
+
+| Path | Role |
+|---|---|
+| `ui/` | Settings UI (Vite + vanilla JS) |
+| `src-tauri/` | Rust: tray, HTTP API, UDP discovery, TCP print |
+| `test/` | Browser API smoke-test page |
+| `reference/` | Reference implementations (local only, gitignored) |
+
+## Notes
+
+- Do not run Zebra Browser Print at the same time (both use UDP **4201** / HTTP **9100**).
+- Printers must be reachable on the LAN (Wi‑Fi/Ethernet). USB-only printers are out of scope for this version.

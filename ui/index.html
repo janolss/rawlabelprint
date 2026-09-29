@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RawLabelPrint Settings</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="settings">
+      <header>
+        <h1>RawLabelPrint</h1>
+        <p class="subtitle">Browser print bridge for Zebra printers on LAN</p>
+      </header>
+
+      <section class="block">
+        <h2>HTTP server</h2>
+        <div class="row">
+          <label for="listenAddress">Address</label>
+          <input id="listenAddress" type="text" value="127.0.0.1" />
+        </div>
+        <div class="row">
+          <label for="port">Port</label>
+          <input id="port" type="number" min="1" max="65535" value="9100" />
+        </div>
+        <p class="status" id="httpStatus">Status: …</p>
+        <button type="button" class="primary" id="saveHttpBtn">Save &amp; apply</button>
+      </section>
+
+      <section class="block">
+        <h2>Default printer</h2>
+        <div id="defaultPrinter" class="printer-card muted">No default printer selected</div>
+        <div class="button-row">
+          <button type="button" id="searchBtn">Search Zebra printers</button>
+          <button type="button" id="testStatusBtn">Check status</button>
+          <button type="button" id="testPrintBtn">Test print</button>
+        </div>
+        <div id="searchResults" class="search-results hidden"></div>
+      </section>
+
+      <section class="block">
+        <h2>Add printer manually</h2>
+        <div class="row">
+          <label for="manualName">Name</label>
+          <input id="manualName" type="text" placeholder="Shipping label" />
+        </div>
+        <div class="row">
+          <label for="manualAddress">Address</label>
+          <input id="manualAddress" type="text" placeholder="192.168.1.50" />
+        </div>
+        <div class="row">
+          <label for="manualPort">Print port</label>
+          <input id="manualPort" type="number" min="1" max="65535" value="9100" />
+        </div>
+        <button type="button" id="addManualBtn">Add &amp; set as default</button>
+        <div id="addedList" class="added-list"></div>
+      </section>
+
+      <section class="block">
+        <h2>Startup</h2>
+        <label class="checkbox">
+          <input type="checkbox" id="launchAtLogin" />
+          Launch at login
+        </label>
+      </section>
+
+      <p class="footer-note">
+        API: <code id="apiUrl">http://127.0.0.1:9100/</code>
+      </p>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

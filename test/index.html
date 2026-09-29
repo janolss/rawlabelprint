@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RawLabelPrint API Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    input, textarea, select, button { width: 100%; margin: 0.35rem 0 0.8rem; padding: 0.5rem; font: inherit; }
+    .error { color: #b3261e; display: none; }
+    button { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>RawLabelPrint API Test</h1>
+  <ol>
+    <li>
+      Base URL
+      <input id="address" value="http://127.0.0.1:9100" />
+    </li>
+    <li>
+      Select printer <button type="button" id="refresh">Refresh</button>
+      <div class="error" id="listError">Could not reach RawLabelPrint. Is the tray app running?</div>
+      <select id="printers"></select>
+    </li>
+    <li>
+      RAW data
+      <textarea id="data" rows="6">^XA^FO50,50^A0N,40,40^FDHello from browser^FS^XZ</textarea>
+      <button type="button" id="send">Send POST</button>
+    </li>
+  </ol>
+  <pre id="result"></pre>
+  <script>
+    async function refresh() {
+      const address = document.getElementById("address").value.trim();
+      try {
+        const response = await fetch(address);
+        const printers = await response.json();
+        document.getElementById("listError").style.display = "none";
+        document.getElementById("printers").innerHTML = (printers || [])
+          .map((p) => `<option value="${p.Name}">${p.Name}</option>`)
+          .join("");
+        document.getElementById("result").textContent = JSON.stringify(printers, null, 2);
+      } catch (e) {
+        document.getElementById("listError").style.display = "block";
+        document.getElementById("result").textContent = String(e);
+      }
+    }
+
+    async function send() {
+      const address = document.getElementById("address").value.trim();
+      const printer = document.getElementById("printers").value;
+      const data = document.getElementById("data").value;
+      const response = await fetch(address, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ printer, data }),
+      });
+      document.getElementById("result").textContent = await response.text();
+    }
+
+    document.getElementById("refresh").addEventListener("click", refresh);
+    document.getElementById("send").addEventListener("click", send);
+    refresh();
+  </script>
+</body>
+</html>
