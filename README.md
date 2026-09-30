@@ -54,12 +54,19 @@ Enabled by default in Settings (“Compatible mode”). When on, the same endpoi
 | GET/POST | `/available` | List devices as `{ "printer": [ Device, … ], "deviceList": […] }` |
 | GET/POST | `/default` / `/default?type=printer` | Default device JSON, or empty body if none |
 | GET | `/config` | Application configuration stub |
-| POST | `/write` | `{ "device": { "uid", … }, "data": "…" }` → TCP RAW write |
+| POST | `/write` | JSON (`device.send` / `sendUrl`) **or** multipart `json`+`blob` (`device.sendFile`) → TCP RAW write |
 | POST | `/read` | `{ "device": { "uid", … } }` → short read on same TCP session |
+| POST | `/convert` | BrowserPrint convert / `convertAndSendFile` (raw ZPL passthrough; image/PDF conversion not supported) |
+| POST | `/convert/scan` | BrowserPrint `scanImage` stub (same limits as `/convert`) |
 
 Device `uid` is the printer serial when known, otherwise `net:<ip>:<printPort>`.
 
-Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on Apple Silicon machines and official Browser Print elsewhere.
+`/write` accepts both BrowserPrint body styles:
+
+- **JSON** (from `device.send`): `{ "device": { "uid", … }, "data": "^XA…" }`
+- **multipart/form-data** (from `device.sendFile`): field `json` = `{ "device": { … } }`, field `blob` = raw bytes (ZPL/PDF/…)
+
+Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send` / `device.sendFile`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on Apple Silicon machines and official Browser Print elsewhere.
 
 Disable Compatible mode in Settings if you only want the simple `/` API.
 
@@ -72,6 +79,13 @@ Disable Compatible mode in Settings if you only want the simple `/` API.
 5. Adjust HTTP port if needed and **Save & apply** (bind address is fixed to `127.0.0.1`).
 6. Keep **Compatible mode** on for BrowserPrint.js clients.
 7. Optional: enable **Launch at login**.
+
+### macOS Local Network
+
+On macOS 15+, allow **RawLabelPrint** under **System Settings → Privacy & Security → Local Network**.  
+The app browses Bonjour (`_printer._tcp`) at startup to trigger that prompt (menu bar apps otherwise often never show it).  
+
+UDP discovery can succeed while TCP `:9100` still fails with `No route to host (os error 65)` until Local Network is fully granted for the same `.app` you actually run (prefer one install: `/Applications/RawLabelPrint.app`, not a `target/release/...` copy).
 
 Config is stored at:
 

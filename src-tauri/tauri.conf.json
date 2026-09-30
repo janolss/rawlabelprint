@@ -16,8 +16,10 @@
       {
         "label": "settings",
         "title": "RawLabelPrint Settings",
-        "width": 520,
-        "height": 680,
+        "width": 800,
+        "height": 640,
+        "minWidth": 700,
+        "minHeight": 520,
         "resizable": true,
         "visible": false,
         "center": true

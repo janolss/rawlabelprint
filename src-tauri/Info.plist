@@ -9,6 +9,8 @@
   <key>NSBonjourServices</key>
   <array>
     <string>_printer._tcp</string>
+    <string>_ipp._tcp</string>
+    <string>_http._tcp</string>
   </array>
 </dict>
 </plist>

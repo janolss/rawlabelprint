@@ -27,9 +27,9 @@ body {
 }
 
 .settings {
-  max-width: 480px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 20px 18px 28px;
+  padding: 10px 9px 14px;
 }
 
 header h1 {
@@ -39,9 +39,83 @@ header h1 {
 }
 
 .subtitle {
-  margin: 4px 0 16px;
+  margin: 4px 0 12px;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--panel) 70%, var(--line));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: color-mix(in srgb, white 55%, transparent);
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.printers-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.95fr) minmax(280px, 1.15fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.printers-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.printers-col .block {
+  margin-bottom: 10px;
+}
+
+.printers-col .block:last-child {
+  margin-bottom: 0;
+}
+
+.block-fill {
+  min-height: 100%;
+}
+
+@media (max-width: 640px) {
+  .printers-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .block {
@@ -56,6 +130,19 @@ header h1 {
   margin: 0 0 12px;
   font-size: 0.95rem;
   font-weight: 600;
+}
+
+.block-subtitle {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.block-divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 16px 0 14px;
 }
 
 .row {
@@ -122,9 +209,36 @@ button.primary:hover {
   background: var(--accent-hover);
 }
 
+button.danger {
+  background: #fdecea;
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+  color: var(--bad);
+}
+
+button.danger:hover {
+  background: #f9d7d4;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.tabs .tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tabs .tab:hover {
+  background: color-mix(in srgb, white 55%, transparent);
+  color: var(--text);
+}
+
+.tabs .tab.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
 }
 
 .button-row {
@@ -221,6 +335,20 @@ button:disabled {
   color: var(--muted);
 }
 
+.badge.status-badge {
+  cursor: pointer;
+  user-select: none;
+}
+
+.badge.status-badge:hover {
+  filter: brightness(0.97);
+}
+
+.badge.status-badge:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, white);
+  outline-offset: 1px;
+}
+
 .checkbox {
   display: flex;
   gap: 8px;
@@ -268,7 +396,7 @@ button:disabled {
 }
 
 .footer-note {
-  margin: 8px 2px 0;
+  margin: 14px 0 0;
   color: var(--muted);
   font-size: 0.8rem;
 }

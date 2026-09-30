@@ -25,6 +25,9 @@ if-addrs = "0.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [profile.release]
 codegen-units = 1
 lto = true

@@ -22,6 +22,9 @@ pub struct PrinterStatus {
     pub status: String,
     pub error_messages: Vec<String>,
     pub warning_messages: Vec<String>,
+    /// Human-readable connect / probe detail (e.g. os error 65).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 struct DeviceSession {
@@ -141,40 +144,63 @@ pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), Stri
     Ok(())
 }
 
-/// Probe printer online status via TCP 9100 + ~HQES, fallback to config port 8080.
+/// Probe printer online status via TCP print port + ~HQES, fallback to HTTP config port.
 pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
+    let config_port = if printer.config_port == 0 {
+        80
+    } else {
+        printer.config_port
+    };
     let mut status = PrinterStatus {
         print_port: printer.print_port,
-        config_port: 8080,
+        config_port,
         status: "unknown".into(),
         error_messages: Vec::new(),
         warning_messages: Vec::new(),
+        detail: None,
     };
 
     let print_addr: Result<SocketAddr, _> =
         format!("{}:{}", printer.address, printer.print_port).parse();
     let Ok(print_addr) = print_addr else {
         status.status = "offline".into();
+        status.detail = Some(format!("Invalid address: {}", printer.address));
         return status;
     };
 
     match TcpStream::connect_timeout(&print_addr, CONNECT_TIMEOUT) {
         Ok(mut stream) => {
-            let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
+            // Short read timeout: printers often keep the RAW socket open after ~HQES.
+            let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
             let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
-            let _ = stream.write_all(b"~HQES\r\n");
+            if let Err(e) = stream.write_all(b"~HQES\r\n") {
+                status.status = "offline".into();
+                status.detail = Some(format!("Connected but write failed: {e}"));
+                return status;
+            }
             let _ = stream.flush();
 
             let mut buf = Vec::new();
             let mut chunk = [0u8; 2048];
-            loop {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
                 match stream.read(&mut chunk) {
                     Ok(0) => break,
-                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk[..n]);
+                        if buf.len() > 8192 || buf.windows(2).any(|w| w == b"\n\n" || w == b"\r\n")
+                        {
+                            // Likely complete HQES reply; don't wait for socket close.
+                            break;
+                        }
+                    }
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        break;
+                    }
                     Err(_) => break,
-                }
-                if buf.len() > 8192 {
-                    break;
                 }
             }
 
@@ -182,23 +208,52 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
             let (errors, warnings) = decode_hqes(&response);
             status.error_messages = errors;
             status.warning_messages = warnings;
+            // Reachable RAW port counts as online even if ~HQES is empty/unsupported.
             status.status = if status.error_messages.is_empty() {
                 "online".into()
             } else {
                 "offline".into()
             };
+            if buf.is_empty() {
+                status.detail = Some(format!(
+                    "Connected to {}:{} (no ~HQES response)",
+                    printer.address, printer.print_port
+                ));
+            }
             status
         }
-        Err(_) => {
+        Err(e) => {
+            let print_err = format!(
+                "TCP {}:{} — {e}",
+                printer.address, printer.print_port
+            );
+            // Web UI is usually on config_port (80). Reachable HTTP helps diagnose Local Network vs RAW port.
             let config_addr: Result<SocketAddr, _> =
-                format!("{}:8080", printer.address).parse();
+                format!("{}:{}", printer.address, config_port).parse();
             if let Ok(config_addr) = config_addr {
-                if TcpStream::connect_timeout(&config_addr, CONNECT_TIMEOUT).is_ok() {
-                    status.status = "online".into();
-                    return status;
+                match TcpStream::connect_timeout(&config_addr, CONNECT_TIMEOUT) {
+                    Ok(_) => {
+                        status.status = "offline".into();
+                        status.detail = Some(format!(
+                            "{print_err}. HTTP :{config_port} is reachable — check Local Network permission for RawLabelPrint, or that RAW port {} is open",
+                            printer.print_port
+                        ));
+                        status.error_messages.push(print_err);
+                        return status;
+                    }
+                    Err(e2) => {
+                        status.status = "offline".into();
+                        status.detail = Some(format!(
+                            "{print_err}. HTTP :{config_port} also failed: {e2}. Enable Local Network for RawLabelPrint in System Settings"
+                        ));
+                        status.error_messages.push(print_err);
+                        return status;
+                    }
                 }
             }
             status.status = "offline".into();
+            status.detail = Some(print_err.clone());
+            status.error_messages.push(print_err);
             status
         }
     }

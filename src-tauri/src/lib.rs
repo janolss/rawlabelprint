@@ -1,6 +1,8 @@
 mod config;
 mod discovery;
 mod http_server;
+#[cfg(target_os = "macos")]
+mod local_network;
 mod print;
 mod state;
 
@@ -205,10 +207,19 @@ pub fn run() {
             Some(vec![]),
         ))
         .setup(|app| {
-            // Hide from dock on macOS (menu bar / tray agent)
+            // Hide from dock on macOS (menu bar / tray agent).
+            // Briefly use Regular first so the Local Network permission dialog can appear.
             #[cfg(target_os = "macos")]
             {
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                std::thread::spawn(|| {
+                    local_network::trigger_local_network_permission_prompt();
+                });
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                });
             }
 
             let app_data_dir = app
