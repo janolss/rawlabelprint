@@ -69,7 +69,7 @@ Disable Compatible mode in Settings if you only want the simple `/` API.
 2. Click the tray icon (or **Settings…**).
 3. Click **Search Zebra printers**, wait ~5 seconds, then **Set as default**.
 4. Optionally add a printer manually (name, IP, print port).
-5. Adjust HTTP bind address/port if needed and **Save & apply**.
+5. Adjust HTTP port if needed and **Save & apply** (bind address is fixed to `127.0.0.1`).
 6. Keep **Compatible mode** on for BrowserPrint.js clients.
 7. Optional: enable **Launch at login**.
 

@@ -344,7 +344,6 @@ els.addManualBtn.addEventListener("click", async () => {
   }
 });
 
-els.listenAddress.addEventListener("input", updateApiUrl);
 els.port.addEventListener("input", updateApiUrl);
 
 load().catch((e) => {
