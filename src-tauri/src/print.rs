@@ -155,6 +155,30 @@ pub fn send_raw_bytes_to_printer(printer: &PrinterInfo, data: &[u8]) -> Result<(
 }
 
 /// Probe printer online status via TCP print port + ~HQES, fallback to HTTP config port.
+fn raw_port_hint(print_port: u16) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        format!(
+            "check Local Network permission for RawLabelPrint, or that RAW port {print_port} is open"
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        format!("check firewall/routing, or that RAW port {print_port} is open")
+    }
+}
+
+fn network_access_hint() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Enable Local Network for RawLabelPrint in System Settings"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Check that the printer is on the same LAN and not blocked by a firewall"
+    }
+}
+
 pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
     let config_port = if printer.config_port == 0 {
         80
@@ -234,7 +258,7 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
         }
         Err(e) => {
             let print_err = format!("TCP {}:{} — {e}", printer.address, printer.print_port);
-            // Web UI is usually on config_port (80). Reachable HTTP helps diagnose Local Network vs RAW port.
+            // Web UI is usually on config_port (80). Reachable HTTP helps diagnose permission vs RAW port.
             let config_addr: Result<SocketAddr, _> =
                 format!("{}:{}", printer.address, config_port).parse();
             if let Ok(config_addr) = config_addr {
@@ -242,8 +266,8 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
                     Ok(_) => {
                         status.status = "offline".into();
                         status.detail = Some(format!(
-                            "{print_err}. HTTP :{config_port} is reachable — check Local Network permission for RawLabelPrint, or that RAW port {} is open",
-                            printer.print_port
+                            "{print_err}. HTTP :{config_port} is reachable — {hint}",
+                            hint = raw_port_hint(printer.print_port)
                         ));
                         status.error_messages.push(print_err);
                         return status;
@@ -251,7 +275,8 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
                     Err(e2) => {
                         status.status = "offline".into();
                         status.detail = Some(format!(
-                            "{print_err}. HTTP :{config_port} also failed: {e2}. Enable Local Network for RawLabelPrint in System Settings"
+                            "{print_err}. HTTP :{config_port} also failed: {e2}. {hint}",
+                            hint = network_access_hint()
                         ));
                         status.error_messages.push(print_err);
                         return status;
