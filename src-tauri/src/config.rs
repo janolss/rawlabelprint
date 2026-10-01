@@ -137,6 +137,9 @@ pub struct AppConfig {
     /// When true, capture recent print requests in an in-memory ring buffer for Settings.
     #[serde(default = "default_debug_logging")]
     pub debug_logging: bool,
+    /// Browser Origins allowed to print via the local HTTP API (soft allowlist).
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 fn default_listen_address() -> String {
@@ -170,11 +173,42 @@ impl Default for AppConfig {
             launch_at_login: false,
             browser_print_compatible: default_browser_print_compatible(),
             debug_logging: default_debug_logging(),
+            allowed_origins: Vec::new(),
         }
     }
 }
 
 impl AppConfig {
+    pub fn normalize_origin(raw: &str) -> String {
+        raw.trim().to_ascii_lowercase()
+    }
+
+    pub fn is_origin_allowed(&self, origin: &str) -> bool {
+        let key = Self::normalize_origin(origin);
+        self.allowed_origins
+            .iter()
+            .any(|o| Self::normalize_origin(o) == key)
+    }
+
+    /// Insert origin into the soft allowlist. Returns true if newly added.
+    pub fn allow_origin(&mut self, origin: &str) -> bool {
+        let key = Self::normalize_origin(origin);
+        if key.is_empty() || self.is_origin_allowed(&key) {
+            return false;
+        }
+        self.allowed_origins.push(key);
+        true
+    }
+
+    /// Remove origin from the soft allowlist. Returns true if it was present.
+    pub fn revoke_origin(&mut self, origin: &str) -> bool {
+        let key = Self::normalize_origin(origin);
+        let before = self.allowed_origins.len();
+        self.allowed_origins
+            .retain(|o| Self::normalize_origin(o) != key);
+        self.allowed_origins.len() != before
+    }
+
     /// Ensure default printer is always present in the saved list.
     pub fn normalize_saved_printers(&mut self) {
         if let Some(default) = self.default_printer.clone() {
@@ -294,6 +328,18 @@ mod tests {
             config_port: 80,
             connection: CONNECTION_NETWORK.into(),
         }
+    }
+
+    #[test]
+    fn allow_and_revoke_origin() {
+        let mut cfg = AppConfig::default();
+        assert!(cfg.allow_origin("https://Hotel.Example.com"));
+        assert!(!cfg.allow_origin("https://hotel.example.com"));
+        assert!(cfg.is_origin_allowed("HTTPS://HOTEL.EXAMPLE.COM"));
+        assert!(cfg.revoke_origin("https://hotel.example.com"));
+        assert!(!cfg.is_origin_allowed("https://hotel.example.com"));
+        assert!(!cfg.revoke_origin("https://hotel.example.com"));
+        assert!(!cfg.allow_origin("  "));
     }
 
     #[test]

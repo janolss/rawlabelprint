@@ -2,6 +2,7 @@ use crate::http_server::fetch::fetch_url_bytes;
 use crate::http_server::multipart::{
     multipart_boundary, parse_multipart_parts, parse_write_request,
 };
+use crate::http_server::origin::ensure_origin_allowed;
 use crate::http_server::resolve::{
     collect_known_printers, resolve_by_device_ref, BrowserDeviceRef,
 };
@@ -149,6 +150,9 @@ pub(crate) async fn handle_write(
     if let Err(resp) = require_compatible(&state).await {
         return resp;
     }
+    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
+        return json_err(status, msg);
+    }
 
     let parsed = match parse_write_request(&headers, &body) {
         Ok(v) => v,
@@ -250,6 +254,9 @@ async fn handle_convert_inner(
     let looks_raw = blob_looks_like_raw_label(&blob);
 
     if action.eq_ignore_ascii_case("print") && looks_raw {
+        if let Err((status, msg)) = ensure_origin_allowed(state, headers).await {
+            return Ok(json_err(status, msg));
+        }
         let device = meta
             .device
             .ok_or_else(|| "device required when options.action=print".to_string())?;

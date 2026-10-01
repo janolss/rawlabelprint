@@ -51,11 +51,14 @@ pub(crate) fn test_state(
     if let Some(p) = default {
         config.upsert_printer(p, true);
     }
+    let (pending_tx, _) = tokio::sync::broadcast::channel(8);
     HttpSharedState {
         config: Arc::new(RwLock::new(config)),
         discovered: Arc::new(RwLock::new(discovered)),
         sessions: Arc::new(DeviceSessionPool::new()),
         print_log: Arc::new(PrintLog::new()),
+        pending_origins: Arc::new(RwLock::new(std::collections::BTreeSet::new())),
+        pending_tx,
     }
 }
 
@@ -69,11 +72,14 @@ pub(crate) async fn state_with_printer(
         ..Default::default()
     };
     config.upsert_printer(printer, true);
+    let (pending_tx, _) = tokio::sync::broadcast::channel(8);
     HttpSharedState {
         config: Arc::new(RwLock::new(config)),
         discovered: Arc::new(RwLock::new(Vec::new())),
         sessions: Arc::new(DeviceSessionPool::new()),
         print_log: Arc::new(PrintLog::new()),
+        pending_origins: Arc::new(RwLock::new(std::collections::BTreeSet::new())),
+        pending_tx,
     }
 }
 

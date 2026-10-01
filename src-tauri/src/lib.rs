@@ -9,13 +9,14 @@ mod state;
 mod usb_discovery;
 
 use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo, CONNECTION_NETWORK};
+use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
 use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogEntry;
 use state::AppState;
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use usb_discovery::search_all_printers;
 
@@ -233,6 +234,53 @@ async fn resend_print_log(state: tauri::State<'_, Arc<AppState>>, id: u64) -> Re
     state.resend_print_log(id).await
 }
 
+#[tauri::command]
+async fn get_origin_permissions(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<OriginPermissions, String> {
+    Ok(permissions_snapshot(&state.http_shared()).await)
+}
+
+#[tauri::command]
+async fn approve_origin(
+    state: tauri::State<'_, Arc<AppState>>,
+    origin: String,
+) -> Result<OriginPermissions, String> {
+    let key = AppConfig::normalize_origin(&origin);
+    if key.is_empty() {
+        return Err("Origin is required".into());
+    }
+    {
+        let mut cfg = state.config.write().await;
+        cfg.allow_origin(&key);
+    }
+    dismiss_pending(&state.http_shared(), &key).await;
+    state.persist().await?;
+    Ok(permissions_snapshot(&state.http_shared()).await)
+}
+
+#[tauri::command]
+async fn deny_origin(
+    state: tauri::State<'_, Arc<AppState>>,
+    origin: String,
+) -> Result<OriginPermissions, String> {
+    dismiss_pending(&state.http_shared(), &origin).await;
+    Ok(permissions_snapshot(&state.http_shared()).await)
+}
+
+#[tauri::command]
+async fn revoke_origin(
+    state: tauri::State<'_, Arc<AppState>>,
+    origin: String,
+) -> Result<OriginPermissions, String> {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.revoke_origin(&origin);
+    }
+    state.persist().await?;
+    Ok(permissions_snapshot(&state.http_shared()).await)
+}
+
 fn show_settings(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
@@ -278,6 +326,23 @@ pub fn run() {
 
             let config = load_config(&app_data_dir);
             let state = Arc::new(AppState::new(app_data_dir, config.clone()));
+
+            // Open Settings when a new website needs print approval.
+            let mut pending_rx = state.subscribe_pending_origins();
+            let app_for_pending = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    match pending_rx.recv().await {
+                        Ok(origin) => {
+                            tracing::info!("Print approval needed for origin {origin}");
+                            let _ = app_for_pending.emit("origin-pending", &origin);
+                            show_settings(&app_for_pending);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
 
             // Start HTTP server
             let state_for_http = state.clone();
@@ -379,7 +444,11 @@ pub fn run() {
             test_print,
             get_print_log,
             clear_print_log,
-            resend_print_log
+            resend_print_log,
+            get_origin_permissions,
+            approve_origin,
+            deny_origin,
+            revoke_origin
         ])
         .run(tauri::generate_context!())
         .expect("error while running RawLabelPrint");

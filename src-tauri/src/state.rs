@@ -2,9 +2,10 @@ use crate::config::{save_config, AppConfig, PrinterInfo};
 use crate::http_server::{start_http_server, HttpServerHandle, HttpSharedState};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 
 pub struct AppState {
     pub app_data_dir: PathBuf,
@@ -12,18 +13,23 @@ pub struct AppState {
     pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
     pub sessions: Arc<DeviceSessionPool>,
     pub print_log: Arc<PrintLog>,
+    pub pending_origins: Arc<RwLock<BTreeSet<String>>>,
+    pub pending_tx: broadcast::Sender<String>,
     pub http: Mutex<Option<HttpServerHandle>>,
     pub http_status: Mutex<String>,
 }
 
 impl AppState {
     pub fn new(app_data_dir: PathBuf, config: AppConfig) -> Self {
+        let (pending_tx, _) = broadcast::channel(32);
         Self {
             app_data_dir,
             config: Arc::new(RwLock::new(config)),
             discovered: Arc::new(RwLock::new(Vec::new())),
             sessions: Arc::new(DeviceSessionPool::new()),
             print_log: Arc::new(PrintLog::new()),
+            pending_origins: Arc::new(RwLock::new(BTreeSet::new())),
+            pending_tx,
             http: Mutex::new(None),
             http_status: Mutex::new("stopped".into()),
         }
@@ -35,7 +41,13 @@ impl AppState {
             discovered: self.discovered.clone(),
             sessions: self.sessions.clone(),
             print_log: self.print_log.clone(),
+            pending_origins: self.pending_origins.clone(),
+            pending_tx: self.pending_tx.clone(),
         }
+    }
+
+    pub fn subscribe_pending_origins(&self) -> broadcast::Receiver<String> {
+        self.pending_tx.subscribe()
     }
 
     pub async fn persist(&self) -> Result<(), String> {

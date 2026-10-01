@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { buildPrintLogHtml, escapeHtml } from "./print-log-view.ts";
@@ -15,6 +16,7 @@ import {
 } from "./search-results-view.ts";
 import type {
   AppConfig,
+  OriginPermissions,
   PrinterInfo,
   PrinterStatus,
   PrintLogEntry,
@@ -46,6 +48,8 @@ const els = {
   printLogList: requireEl<HTMLElement>("printLogList"),
   refreshPrintLogBtn: requireEl<HTMLButtonElement>("refreshPrintLogBtn"),
   clearPrintLogBtn: requireEl<HTMLButtonElement>("clearPrintLogBtn"),
+  originPendingList: requireEl<HTMLElement>("originPendingList"),
+  originAllowedList: requireEl<HTMLElement>("originAllowedList"),
 };
 
 let currentConfig: AppConfig | null = null;
@@ -277,6 +281,54 @@ function renderPrintLog(entries: PrintLogEntry[]): void {
   els.printLogList.innerHTML = buildPrintLogHtml(entries);
 }
 
+function renderOriginPermissions(perms: OriginPermissions): void {
+  if (!perms.pending.length) {
+    els.originPendingList.innerHTML = "";
+  } else {
+    els.originPendingList.innerHTML = perms.pending
+      .map(
+        (origin) => `
+      <div class="origin-row" data-origin="${escapeHtml(origin)}">
+        <span class="badge warn">Pending</span>
+        <span class="origin-url" title="${escapeHtml(origin)}">${escapeHtml(origin)}</span>
+        <div class="button-row inline">
+          <button type="button" data-origin-action="approve">Allow</button>
+          <button type="button" data-origin-action="deny">Deny</button>
+        </div>
+      </div>`
+      )
+      .join("");
+  }
+
+  if (!perms.allowed.length) {
+    els.originAllowedList.innerHTML =
+      '<div class="printer-card muted">No websites approved yet</div>';
+  } else {
+    els.originAllowedList.innerHTML = perms.allowed
+      .map(
+        (origin) => `
+      <div class="origin-row" data-origin="${escapeHtml(origin)}">
+        <span class="badge ok">Allowed</span>
+        <span class="origin-url" title="${escapeHtml(origin)}">${escapeHtml(origin)}</span>
+        <div class="button-row inline">
+          <button type="button" class="danger" data-origin-action="revoke">Remove</button>
+        </div>
+      </div>`
+      )
+      .join("");
+  }
+}
+
+async function refreshOriginPermissions(): Promise<void> {
+  try {
+    const perms = await invoke<OriginPermissions>("get_origin_permissions");
+    renderOriginPermissions(perms);
+  } catch (e) {
+    els.originPendingList.innerHTML = "";
+    els.originAllowedList.innerHTML = `<div class="printer-card"><span class="badge bad">${escapeHtml(String(e))}</span></div>`;
+  }
+}
+
 async function refreshPrintLog(): Promise<void> {
   try {
     const entries = await invoke<PrintLogEntry[]>("get_print_log");
@@ -292,6 +344,7 @@ async function load(): Promise<void> {
   await refreshHttpStatus();
   await refreshAllPrinterStatuses();
   await refreshPrintLog();
+  await refreshOriginPermissions();
 }
 
 els.saveHttpBtn.addEventListener("click", async () => {
@@ -349,6 +402,57 @@ els.clearPrintLogBtn.addEventListener("click", async () => {
   } finally {
     els.clearPrintLogBtn.disabled = false;
   }
+});
+
+async function handleOriginAction(
+  action: string,
+  origin: string,
+  btn: HTMLButtonElement
+): Promise<void> {
+  btn.disabled = true;
+  try {
+    const command =
+      action === "approve"
+        ? "approve_origin"
+        : action === "deny"
+          ? "deny_origin"
+          : "revoke_origin";
+    const perms = await invoke<OriginPermissions>(command, { origin });
+    renderOriginPermissions(perms);
+  } catch (e) {
+    console.error(e);
+    alert(String(e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+els.originPendingList.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
+  if (!btn) return;
+  const row = btn.closest<HTMLElement>("[data-origin]");
+  const origin = row?.dataset.origin;
+  const action = btn.dataset.originAction;
+  if (!origin || !action) return;
+  void handleOriginAction(action, origin, btn);
+});
+
+els.originAllowedList.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
+  if (!btn) return;
+  const row = btn.closest<HTMLElement>("[data-origin]");
+  const origin = row?.dataset.origin;
+  const action = btn.dataset.originAction;
+  if (!origin || !action) return;
+  void handleOriginAction(action, origin, btn);
+});
+
+void listen("origin-pending", () => {
+  refreshOriginPermissions().catch((e) => console.error(e));
 });
 
 els.printLogList.addEventListener("click", async (e) => {

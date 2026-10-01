@@ -142,6 +142,16 @@
                 Keeps the last 50 print jobs in memory (payload preview up to 20&nbsp;KB).
               </p>
             </section>
+
+            <section class="block">
+              <h3 class="block-subtitle">Allowed websites</h3>
+              <p class="hint">
+                The first print from a new website requires approval here. Requests without an
+                <code>Origin</code> header (e.g. scripts) are not gated.
+              </p>
+              <div id="originPendingList" class="origin-list"></div>
+              <div id="originAllowedList" class="origin-list"></div>
+            </section>
           </div>
         </div>
 

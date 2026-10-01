@@ -1,6 +1,7 @@
 mod browser_print;
 mod fetch;
 mod multipart;
+pub(crate) mod origin;
 mod resolve;
 mod response;
 mod simple;
@@ -20,10 +21,11 @@ use browser_print::{
     handle_read, handle_write,
 };
 use simple::handle_root;
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{broadcast, oneshot, Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
 /// Max HTTP request body size (simple API, /write, /convert, …).
@@ -35,6 +37,9 @@ pub struct HttpSharedState {
     pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
     pub sessions: Arc<DeviceSessionPool>,
     pub print_log: Arc<PrintLog>,
+    pub pending_origins: Arc<RwLock<BTreeSet<String>>>,
+    /// Notifies UI when a new origin needs approval (may have no subscribers in tests).
+    pub pending_tx: broadcast::Sender<String>,
 }
 
 impl HttpSharedState {

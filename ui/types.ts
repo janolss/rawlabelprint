@@ -21,6 +21,12 @@ export interface AppConfig {
   launchAtLogin: boolean;
   browserPrintCompatible: boolean;
   debugLogging: boolean;
+  allowedOrigins?: string[];
+}
+
+export interface OriginPermissions {
+  allowed: string[];
+  pending: string[];
 }
 
 export interface PrinterStatus {

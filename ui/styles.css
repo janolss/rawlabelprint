@@ -338,6 +338,39 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+.origin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.origin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafa;
+  font-size: 0.85rem;
+}
+
+.origin-row .origin-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.origin-row .button-row {
+  margin: 0;
+  flex-shrink: 0;
+}
+
 .printer-card {
   border: 1px solid var(--line);
   border-radius: 8px;
