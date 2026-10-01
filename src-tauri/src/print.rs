@@ -293,6 +293,10 @@ fn extract_hex_flags(line: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn decode_hqes_nonzero_error_flag() {
@@ -306,5 +310,62 @@ mod tests {
         let (errors, warnings) = decode_hqes("ERRORS:         00000000\nWARNINGS:       00000000\n");
         assert!(errors.is_empty());
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn decode_hqes_mixed_error_and_warning() {
+        let (errors, warnings) =
+            decode_hqes("ERRORS: 00000002\nWARNINGS: 00000004\nOTHER: ignore\n");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("0x00000002"));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("0x00000004"));
+    }
+
+    #[test]
+    fn decode_hqes_malformed_lines_are_ignored() {
+        let (errors, warnings) = decode_hqes("ERRORS:\nWARNINGS: not-hex\n");
+        assert!(errors.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn extract_hex_flags_supports_0x_prefix() {
+        assert_eq!(extract_hex_flags("ERRORS: 0x0000000A"), Some(0xA));
+        assert_eq!(extract_hex_flags("no flags here"), None);
+    }
+
+    #[test]
+    fn session_pool_write_reaches_mock_tcp() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut buf = Vec::new();
+            let _ = stream.read_to_end(&mut buf);
+            *received_clone.lock().unwrap() = buf;
+        });
+
+        let printer = PrinterInfo {
+            name: None,
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: "MOCK1".into(),
+            address: "127.0.0.1".into(),
+            port: 0,
+            print_port: port,
+            config_port: 80,
+        };
+        let zpl = b"^XA^FDHi^FS^XZ";
+        {
+            let pool = DeviceSessionPool::new();
+            pool.write("MOCK1", &printer, zpl).unwrap();
+        } // drop closes TCP so mock read_to_end completes
+
+        handle.join().unwrap();
+        assert_eq!(received.lock().unwrap().as_slice(), zpl);
     }
 }

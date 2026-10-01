@@ -36,6 +36,28 @@ impl HttpServerHandle {
     }
 }
 
+fn build_app_router(state: HttpSharedState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
+
+    Router::new()
+        // RawLabelPrint simple API (always on)
+        .route("/", any(handle_root))
+        // Zebra Browser Print compatible API (gated by config flag)
+        .route("/available", any(handle_available))
+        .route("/default", any(handle_default))
+        .route("/config", get(handle_bp_config))
+        .route("/write", post(handle_write))
+        .route("/read", post(handle_read))
+        // BrowserPrint.js convert / convertAndSendFile / scanImage
+        .route("/convert", post(handle_convert))
+        .route("/convert/scan", post(handle_convert_scan))
+        .with_state(state)
+        .layer(cors)
+}
+
 pub async fn start_http_server(
     listen_address: &str,
     port: u16,
@@ -49,25 +71,7 @@ pub async fn start_http_server(
         .await
         .map_err(|e| format!("Failed to bind HTTP {addr}: {e}"))?;
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
-
-    let app = Router::new()
-        // RawLabelPrint simple API (always on)
-        .route("/", any(handle_root))
-        // Zebra Browser Print compatible API (gated by config flag)
-        .route("/available", any(handle_available))
-        .route("/default", any(handle_default))
-        .route("/config", get(handle_bp_config))
-        .route("/write", post(handle_write))
-        .route("/read", post(handle_read))
-        // BrowserPrint.js convert / convertAndSendFile / scanImage
-        .route("/convert", post(handle_convert))
-        .route("/convert/scan", post(handle_convert_scan))
-        .with_state(state)
-        .layer(cors);
+    let app = build_app_router(state);
 
     let (tx, rx) = oneshot::channel::<()>();
 
@@ -500,6 +504,7 @@ async fn handle_write(
     }
 }
 
+#[derive(Debug)]
 struct ParsedWrite {
     device: BrowserDeviceRef,
     data: Vec<u8>,
@@ -850,7 +855,45 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderValue;
+    use axum::body::Body;
+    use axum::http::{HeaderValue, Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn sample_printer(address: &str, serial: &str) -> PrinterInfo {
+        PrinterInfo {
+            name: Some(format!("Printer {address}")),
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: serial.into(),
+            address: address.into(),
+            port: 0,
+            print_port: 9100,
+            config_port: 80,
+        }
+    }
+
+    fn test_state(compatible: bool, default: Option<PrinterInfo>, discovered: Vec<PrinterInfo>) -> HttpSharedState {
+        let mut config = AppConfig::default();
+        config.browser_print_compatible = compatible;
+        if let Some(p) = default {
+            config.upsert_printer(p, true);
+        }
+        HttpSharedState {
+            config: Arc::new(RwLock::new(config)),
+            discovered: Arc::new(RwLock::new(discovered)),
+            sessions: Arc::new(DeviceSessionPool::new()),
+        }
+    }
+
+    async fn body_bytes(response: Response) -> Vec<u8> {
+        response.into_body().collect().await.unwrap().to_bytes().to_vec()
+    }
+
+    async fn body_json(response: Response) -> serde_json::Value {
+        let bytes = body_bytes(response).await;
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    }
 
     #[test]
     fn multipart_boundary_extraction() {
@@ -860,6 +903,11 @@ mod tests {
             )
             .as_deref(),
             Some("----WebKitFormBoundaryjCzCASXAXUOmmw2k")
+        );
+        assert_eq!(
+            multipart_boundary(r#"multipart/form-data; boundary="----QuotedBound""#)
+                .as_deref(),
+            Some("----QuotedBound")
         );
         assert!(multipart_boundary("application/json").is_none());
     }
@@ -891,18 +939,259 @@ Content-Type: text/plain\r\n\r\n\
     }
 
     #[test]
+    fn parse_multipart_missing_json_errors() {
+        let boundary = "bound";
+        let body = format!(
+            "--{boundary}\r\n\
+Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
+^XA^XZ\r\n\
+--{boundary}--\r\n"
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(&format!("multipart/form-data; boundary={boundary}")).unwrap(),
+        );
+        let err = parse_write_request(&headers, body.as_bytes()).unwrap_err();
+        assert!(err.contains("json"));
+    }
+
+    #[test]
     fn parse_json_send_still_works() {
         let body = br#"{"device":{"uid":"ABC"},"data":"^XA^XZ"}"#;
         let headers = HeaderMap::new();
         let parsed = parse_write_request(&headers, body).unwrap();
         assert_eq!(parsed.device.uid.as_deref(), Some("ABC"));
         assert_eq!(String::from_utf8_lossy(&parsed.data), "^XA^XZ");
+        assert!(parsed.url.is_none());
+    }
+
+    #[test]
+    fn parse_json_send_url_field() {
+        let body = br#"{"device":{"uid":"ABC"},"url":"http://example.com/label.zpl"}"#;
+        let headers = HeaderMap::new();
+        let parsed = parse_write_request(&headers, body).unwrap();
+        assert_eq!(parsed.url.as_deref(), Some("http://example.com/label.zpl"));
+        assert!(parsed.data.is_empty());
     }
 
     #[test]
     fn raw_label_detection() {
         assert!(blob_looks_like_raw_label(b"^XA^XZ"));
         assert!(blob_looks_like_raw_label(b"CT~~CD,~CC^~CT~\n^XA"));
+        assert!(blob_looks_like_raw_label(b"~HS"));
+        assert!(blob_looks_like_raw_label(b"prefix ^XZ suffix"));
         assert!(!blob_looks_like_raw_label(b"%PDF-1.4"));
+        assert!(!blob_looks_like_raw_label(&[0xff, 0xd8, 0xff, 0xe0]));
+    }
+
+    #[tokio::test]
+    async fn resolve_printer_by_empty_name_uses_default() {
+        let printer = sample_printer("10.0.0.1", "SN1");
+        let state = test_state(true, Some(printer.clone()), vec![]);
+        let resolved = resolve_printer(&state, "").await;
+        assert_eq!(resolved.unwrap().address, "10.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn resolve_by_device_ref_uid_serial_and_net() {
+        let printer = sample_printer("10.0.0.1", "SN1");
+        let state = test_state(true, Some(printer.clone()), vec![]);
+
+        let by_serial = resolve_by_device_ref(
+            &state,
+            &BrowserDeviceRef {
+                name: None,
+                uid: Some("SN1".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_serial.address, "10.0.0.1");
+
+        let by_net = resolve_by_device_ref(
+            &state,
+            &BrowserDeviceRef {
+                name: None,
+                uid: Some("net:10.0.0.1:9100".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_net.serial_number, "SN1");
+
+        let by_name = resolve_by_device_ref(
+            &state,
+            &BrowserDeviceRef {
+                name: Some("Printer 10.0.0.1".into()),
+                uid: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_name.address, "10.0.0.1");
+
+        let miss = resolve_by_device_ref(
+            &state,
+            &BrowserDeviceRef {
+                name: Some("nope".into()),
+                uid: Some("missing".into()),
+            },
+        )
+        .await;
+        assert!(miss.is_none());
+    }
+
+    #[tokio::test]
+    async fn available_and_default_contract_when_compatible() {
+        let printer = sample_printer("10.0.0.1", "SN1");
+        let state = test_state(true, Some(printer), vec![]);
+        let app = build_app_router(state);
+
+        let available = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/available")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(available.status(), StatusCode::OK);
+        let avail_json = body_json(available).await;
+        assert!(avail_json["printer"].is_array());
+        assert!(avail_json["deviceList"].is_array());
+        assert_eq!(avail_json["printer"][0]["uid"], "SN1");
+
+        let default = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/default?type=printer")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(default.status(), StatusCode::OK);
+        let def_json = body_json(default).await;
+        assert_eq!(def_json["uid"], "SN1");
+
+        let config = app
+            .oneshot(
+                Request::builder()
+                    .uri("/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(config.status(), StatusCode::OK);
+        let cfg_json = body_json(config).await;
+        assert_eq!(cfg_json["application"]["api_level"], 2);
+    }
+
+    #[tokio::test]
+    async fn default_empty_body_when_no_default_printer() {
+        let state = test_state(true, None, vec![]);
+        let app = build_app_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/default")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = body_bytes(response).await;
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn compatible_off_returns_404_for_bp_routes() {
+        let state = test_state(false, Some(sample_printer("10.0.0.1", "SN1")), vec![]);
+        let app = build_app_router(state);
+
+        let available = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/available")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(available.status(), StatusCode::NOT_FOUND);
+
+        let write = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/write")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"device":{"uid":"SN1"},"data":"^XA^XZ"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(write.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn simple_api_lists_printers() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")), vec![]);
+        let app = build_app_router(state);
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let list = body_json(response).await;
+        assert!(list.is_array());
+        assert_eq!(list[0]["Name"], "Printer 10.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn write_json_reaches_mock_tcp() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+            let mut buf = [0u8; 4096];
+            use std::io::Read;
+            let n = stream.read(&mut buf).unwrap_or(0);
+            *received_clone.lock().unwrap() = buf[..n].to_vec();
+        });
+
+        let mut printer = sample_printer("127.0.0.1", "MOCKWRITE");
+        printer.print_port = port;
+        let state = test_state(true, Some(printer), vec![]);
+        let app = build_app_router(state);
+
+        let zpl = "^XA^FDHttpWrite^FS^XZ";
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/write")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"device":{{"uid":"MOCKWRITE"}},"data":"{zpl}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        handle.join().unwrap();
+        assert_eq!(String::from_utf8_lossy(&received.lock().unwrap()), zpl);
     }
 }

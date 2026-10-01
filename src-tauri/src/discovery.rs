@@ -130,4 +130,12 @@ mod tests {
         assert_eq!(parse_null_terminated(&buf, 40), "V75.0");
         assert_eq!(parse_null_terminated(&buf, 84), "ABC123");
     }
+
+    #[test]
+    fn parse_null_terminated_empty_or_short_buffer() {
+        assert_eq!(parse_null_terminated(&[], 0), "");
+        assert_eq!(parse_null_terminated(&[b'A', b'B'], 5), "");
+        assert_eq!(parse_null_terminated(b"ABC", 0), "ABC");
+        assert_eq!(parse_null_terminated(b"  hi  \0xx", 0), "hi");
+    }
 }

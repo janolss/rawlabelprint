@@ -238,6 +238,19 @@ pub fn save_config(app_data_dir: &PathBuf, config: &AppConfig) -> Result<(), Str
 mod tests {
     use super::*;
 
+    fn sample_printer(address: &str, serial: &str) -> PrinterInfo {
+        PrinterInfo {
+            name: None,
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: serial.into(),
+            address: address.into(),
+            port: 0,
+            print_port: 9100,
+            config_port: 80,
+        }
+    }
+
     #[test]
     fn display_name_prefers_explicit_name() {
         let p = PrinterInfo {
@@ -257,24 +270,46 @@ mod tests {
     }
 
     #[test]
-    fn browser_print_uid_prefers_serial() {
-        let with_serial = PrinterInfo {
-            name: None,
-            model: "ZD421".into(),
-            firmware: String::new(),
-            serial_number: "ABC123".into(),
-            address: "10.0.0.5".into(),
-            port: 0,
-            print_port: 9100,
-            config_port: 80,
+    fn display_name_falls_back_to_model_and_address() {
+        let with_model = sample_printer("10.0.0.5", "");
+        assert_eq!(with_model.display_name(), "ZD421 (10.0.0.5)");
+
+        let address_only = PrinterInfo {
+            model: String::new(),
+            ..sample_printer("10.0.0.5", "")
         };
+        assert_eq!(address_only.display_name(), "10.0.0.5");
+    }
+
+    #[test]
+    fn matches_name_covers_uid_and_rejects_empty() {
+        let p = sample_printer("10.0.0.5", "ABC123");
+        assert!(p.matches_name("ABC123"));
+        assert!(p.matches_name("ZD421 (10.0.0.5)"));
+        assert!(!p.matches_name(""));
+        assert!(!p.matches_name("   "));
+        assert!(!p.matches_name("unknown"));
+    }
+
+    #[test]
+    fn browser_print_uid_prefers_serial() {
+        let with_serial = sample_printer("10.0.0.5", "ABC123");
         assert_eq!(with_serial.browser_print_uid(), "ABC123");
 
-        let without = PrinterInfo {
-            serial_number: String::new(),
-            ..with_serial.clone()
-        };
+        let without = sample_printer("10.0.0.5", "");
         assert_eq!(without.browser_print_uid(), "net:10.0.0.5:9100");
+    }
+
+    #[test]
+    fn to_browser_print_device_shape() {
+        let p = sample_printer("10.0.0.5", "SN1");
+        let device = p.to_browser_print_device();
+        assert_eq!(device["deviceType"], "printer");
+        assert_eq!(device["uid"], "SN1");
+        assert_eq!(device["name"], "ZD421 (10.0.0.5)");
+        assert_eq!(device["connection"], "network");
+        assert_eq!(device["version"], 2);
+        assert_eq!(device["manufacturer"], "Zebra Technologies");
     }
 
     #[test]
@@ -282,13 +317,7 @@ mod tests {
         let mut cfg = AppConfig::default();
         let a = PrinterInfo {
             name: Some("A".into()),
-            model: "ZD421".into(),
-            firmware: String::new(),
-            serial_number: String::new(),
-            address: "10.0.0.1".into(),
-            port: 0,
-            print_port: 9100,
-            config_port: 80,
+            ..sample_printer("10.0.0.1", "")
         };
         cfg.upsert_printer(a, true);
         assert_eq!(cfg.added_printers.len(), 1);
@@ -304,5 +333,121 @@ mod tests {
         cfg.remove_printer("10.0.0.2");
         assert!(cfg.added_printers.is_empty());
         assert!(cfg.default_printer.is_none());
+    }
+
+    #[test]
+    fn remove_printer_falls_back_to_first_remaining() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_printer(sample_printer("10.0.0.1", ""), true);
+        cfg.upsert_printer(sample_printer("10.0.0.2", ""), false);
+        cfg.remove_printer("10.0.0.1");
+        assert_eq!(cfg.added_printers.len(), 1);
+        assert_eq!(cfg.default_printer.as_ref().unwrap().address, "10.0.0.2");
+    }
+
+    #[test]
+    fn update_printer_rejects_unknown_and_duplicate() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_printer(sample_printer("10.0.0.1", ""), true);
+        cfg.upsert_printer(sample_printer("10.0.0.2", ""), false);
+
+        assert!(cfg
+            .update_printer("9.9.9.9", None, "10.0.0.3".into(), 9100)
+            .is_err());
+        assert!(cfg
+            .update_printer("10.0.0.1", None, "10.0.0.2".into(), 9100)
+            .is_err());
+        assert!(cfg
+            .update_printer("10.0.0.1", None, "".into(), 9100)
+            .is_err());
+    }
+
+    #[test]
+    fn update_printer_zero_port_defaults_to_9100() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_printer(sample_printer("10.0.0.1", ""), true);
+        cfg.update_printer("10.0.0.1", None, "10.0.0.1".into(), 0)
+            .unwrap();
+        assert_eq!(cfg.added_printers[0].print_port, 9100);
+    }
+
+    #[test]
+    fn normalize_saved_printers_ensures_default_in_list() {
+        let mut cfg = AppConfig::default();
+        cfg.default_printer = Some(sample_printer("10.0.0.9", "SN9"));
+        cfg.normalize_saved_printers();
+        assert_eq!(cfg.added_printers.len(), 1);
+        assert_eq!(cfg.added_printers[0].address, "10.0.0.9");
+    }
+
+    #[test]
+    fn config_serde_roundtrip() {
+        let mut cfg = AppConfig::default();
+        cfg.browser_print_compatible = false;
+        cfg.launch_at_login = true;
+        cfg.upsert_printer(sample_printer("10.0.0.1", "S1"), true);
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert!(!back.browser_print_compatible);
+        assert!(back.launch_at_login);
+        assert_eq!(back.added_printers.len(), 1);
+        assert_eq!(back.default_printer.as_ref().unwrap().serial_number, "S1");
+    }
+
+    #[test]
+    fn load_save_config_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let mut cfg = AppConfig::default();
+        cfg.browser_print_compatible = false;
+        cfg.upsert_printer(sample_printer("10.0.0.1", "S1"), true);
+        save_config(&path, &cfg).unwrap();
+
+        let loaded = load_config(&path);
+        assert!(!loaded.browser_print_compatible);
+        assert_eq!(loaded.added_printers.len(), 1);
+        assert_eq!(loaded.default_printer.as_ref().unwrap().address, "10.0.0.1");
+    }
+
+    #[test]
+    fn load_config_missing_file_returns_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let loaded = load_config(&dir.path().to_path_buf());
+        assert_eq!(loaded.port, 9100);
+        assert!(loaded.browser_print_compatible);
+        assert!(loaded.added_printers.is_empty());
+        assert!(loaded.default_printer.is_none());
+    }
+
+    #[test]
+    fn load_config_corrupt_json_returns_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        fs::write(config_path(&path), "{not json").unwrap();
+        let loaded = load_config(&path);
+        assert_eq!(loaded.port, 9100);
+        assert!(loaded.browser_print_compatible);
+    }
+
+    #[test]
+    fn load_config_normalizes_orphan_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let json = r#"{
+            "listenAddress": "127.0.0.1",
+            "port": 9100,
+            "defaultPrinter": {
+                "model": "ZD421",
+                "address": "10.0.0.7",
+                "printPort": 9100,
+                "configPort": 80
+            },
+            "addedPrinters": [],
+            "browserPrintCompatible": true
+        }"#;
+        fs::write(config_path(&path), json).unwrap();
+        let loaded = load_config(&path);
+        assert_eq!(loaded.added_printers.len(), 1);
+        assert_eq!(loaded.added_printers[0].address, "10.0.0.7");
     }
 }
