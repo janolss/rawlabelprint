@@ -129,8 +129,36 @@
                 Launch at login
               </label>
             </section>
+
+            <section class="block">
+              <h3 class="block-subtitle">Debug</h3>
+              <label class="checkbox">
+                <input type="checkbox" id="debugLogging" checked />
+                Capture recent print requests
+              </label>
+              <p class="hint">
+                Keeps the last 50 print jobs in memory (payload preview up to 20&nbsp;KB).
+              </p>
+            </section>
           </div>
         </div>
+
+        <section class="block">
+          <div class="block-header-row">
+            <h3 class="block-subtitle">Recent prints</h3>
+            <div class="button-row inline">
+              <button type="button" id="refreshPrintLogBtn">Refresh</button>
+              <button type="button" id="clearPrintLogBtn">Clear</button>
+            </div>
+          </div>
+          <p class="hint">
+            Shows HTTP print calls (<code>/</code>, <code>/write</code>, <code>/convert</code>) and
+            in-app test prints.
+          </p>
+          <div id="printLogList" class="print-log-list">
+            <div class="printer-card muted">No print requests captured yet</div>
+          </div>
+        </section>
       </div>
     </main>
     <script type="module" src="./main.js"></script>

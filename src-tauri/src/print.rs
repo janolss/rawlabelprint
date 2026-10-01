@@ -133,12 +133,16 @@ fn connect_printer(printer: &PrinterInfo) -> Result<TcpStream, String> {
 }
 
 pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), String> {
+    send_raw_bytes_to_printer(printer, data.as_bytes())
+}
+
+pub fn send_raw_bytes_to_printer(printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
     let mut stream = connect_printer(printer)?;
     stream
         .set_write_timeout(Some(IO_TIMEOUT))
         .map_err(|e| e.to_string())?;
     stream
-        .write_all(data.as_bytes())
+        .write_all(data)
         .map_err(|e| format!("Failed writing to printer: {e}"))?;
     let _ = stream.flush();
     Ok(())

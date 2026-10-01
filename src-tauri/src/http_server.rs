@@ -1,5 +1,6 @@
 use crate::config::{AppConfig, PrinterInfo};
 use crate::print::{send_raw_to_printer, DeviceSessionPool};
+use crate::print_log::PrintLog;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
@@ -20,6 +21,29 @@ pub struct HttpSharedState {
     pub config: Arc<RwLock<AppConfig>>,
     pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
     pub sessions: Arc<DeviceSessionPool>,
+    pub print_log: Arc<PrintLog>,
+}
+
+impl HttpSharedState {
+    async fn record_print(
+        &self,
+        route: &str,
+        printer: &PrinterInfo,
+        data: &[u8],
+        result: Result<(), String>,
+    ) {
+        if !self.config.read().await.debug_logging {
+            return;
+        }
+        self.print_log.record(
+            route,
+            printer.display_name(),
+            printer.address.clone(),
+            printer.print_port,
+            data,
+            result,
+        );
+    }
 }
 
 pub struct HttpServerHandle {
@@ -304,7 +328,11 @@ async fn do_print(
         )
     })?;
 
-    send_raw_to_printer(&printer, print_data).map_err(|e| {
+    let result = send_raw_to_printer(&printer, print_data);
+    state
+        .record_print("/", &printer, print_data.as_bytes(), result.clone())
+        .await;
+    result.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "error": e }).to_string(),
@@ -490,8 +518,18 @@ async fn handle_write(
 
     let uid = printer.browser_print_uid();
     let sessions = state.sessions.clone();
-    let result =
-        tokio::task::spawn_blocking(move || sessions.write(&uid, &printer, &data)).await;
+    let printer_for_write = printer.clone();
+    let data_for_write = data.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        sessions.write(&uid, &printer_for_write, &data_for_write)
+    })
+    .await;
+
+    let mapped = match &result {
+        Ok(inner) => inner.clone(),
+        Err(e) => Err(e.to_string()),
+    };
+    state.record_print("/write", &printer, &data, mapped).await;
 
     match result {
         Ok(Ok(())) => json_ok("{}".into()),
@@ -740,10 +778,18 @@ async fn handle_convert_inner(
             .ok_or_else(|| "Device not found".to_string())?;
         let uid = printer.browser_print_uid();
         let sessions = state.sessions.clone();
-        tokio::task::spawn_blocking(move || sessions.write(&uid, &printer, &blob))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e)?;
+        let printer_for_write = printer.clone();
+        let blob_for_write = blob.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            sessions.write(&uid, &printer_for_write, &blob_for_write)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        state
+            .record_print("/convert", &printer, &blob, result.clone())
+            .await;
+        result?;
         return Ok(json_ok("{}".into()));
     }
 
@@ -904,5 +950,162 @@ Content-Type: text/plain\r\n\r\n\
         assert!(blob_looks_like_raw_label(b"^XA^XZ"));
         assert!(blob_looks_like_raw_label(b"CT~~CD,~CC^~CT~\n^XA"));
         assert!(!blob_looks_like_raw_label(b"%PDF-1.4"));
+    }
+
+    fn sample_printer(address: &str, print_port: u16) -> PrinterInfo {
+        PrinterInfo {
+            name: Some("LanPrinter".into()),
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: "SERIAL1".into(),
+            address: address.into(),
+            port: 0,
+            print_port,
+            config_port: 80,
+        }
+    }
+
+    async fn accept_one_payload(listener: TcpListener) -> Vec<u8> {
+        use tokio::io::AsyncReadExt;
+        let (mut sock, _) = listener.accept().await.expect("accept");
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 4096];
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_millis(200), sock.read(&mut tmp))
+                .await
+            {
+                Ok(Ok(0)) | Err(_) => break,
+                Ok(Ok(n)) => buf.extend_from_slice(&tmp[..n]),
+                Ok(Err(_)) => break,
+            }
+        }
+        buf
+    }
+
+    async fn state_with_printer(printer: PrinterInfo, debug_logging: bool) -> HttpSharedState {
+        let mut config = AppConfig::default();
+        config.debug_logging = debug_logging;
+        config.browser_print_compatible = true;
+        config.upsert_printer(printer, true);
+        HttpSharedState {
+            config: Arc::new(RwLock::new(config)),
+            discovered: Arc::new(RwLock::new(Vec::new())),
+            sessions: Arc::new(DeviceSessionPool::new()),
+            print_log: Arc::new(PrintLog::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn do_print_records_success_in_print_log() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accept = tokio::spawn(accept_one_payload(listener));
+
+        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), true).await;
+        let zpl = "^XA^FDHttpLog^FS^XZ";
+        let body = do_print(&state, "", zpl).await.expect("print ok");
+        assert!(body.contains("LanPrinter"));
+
+        let received = accept.await.expect("join");
+        assert_eq!(String::from_utf8_lossy(&received), zpl);
+
+        let entries = state.print_log.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].route, "/");
+        assert!(entries[0].ok);
+        assert_eq!(entries[0].data, zpl.as_bytes());
+        assert_eq!(entries[0].printer_address, "127.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn do_print_records_failure_in_print_log() {
+        // Nothing listening — connection should fail and still be logged.
+        let state = state_with_printer(sample_printer("127.0.0.1", 1), true).await;
+        let err = do_print(&state, "", "^XA^XZ").await.unwrap_err();
+        assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let entries = state.print_log.list();
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].ok);
+        assert!(entries[0].error.as_ref().is_some_and(|e| !e.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn do_print_skips_log_when_debug_disabled() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accept = tokio::spawn(accept_one_payload(listener));
+
+        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), false).await;
+        do_print(&state, "", "^XA^XZ").await.expect("print ok");
+        let _ = accept.await;
+        assert!(state.print_log.list().is_empty());
+    }
+
+    #[tokio::test]
+    async fn handle_write_records_in_print_log() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accept = tokio::spawn(accept_one_payload(listener));
+
+        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), true).await;
+        let zpl = "^XA^FDWriteLog^FS^XZ";
+        let body = format!(
+            r#"{{"device":{{"uid":"SERIAL1"}},"data":"{zpl}"}}"#
+        );
+        let response = handle_write(
+            State(state.clone()),
+            HeaderMap::new(),
+            Bytes::from(body),
+        )
+        .await;
+        let (parts, _) = response.into_response().into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let received = accept.await.expect("join");
+        assert_eq!(String::from_utf8_lossy(&received), zpl);
+
+        let entries = state.print_log.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].route, "/write");
+        assert!(entries[0].ok);
+        assert_eq!(entries[0].data, zpl.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn handle_convert_print_records_in_print_log() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accept = tokio::spawn(accept_one_payload(listener));
+
+        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), true).await;
+        let boundary = "----TestBoundary";
+        let zpl = "^XA^FDConvert^FS^XZ";
+        let body = format!(
+            "--{boundary}\r\n\
+Content-Disposition: form-data; name=\"json\"\r\n\r\n\
+{{\"device\":{{\"uid\":\"SERIAL1\"}},\"options\":{{\"action\":\"print\"}}}}\r\n\
+--{boundary}\r\n\
+Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
+{zpl}\r\n\
+--{boundary}--\r\n"
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(&format!("multipart/form-data; boundary={boundary}")).unwrap(),
+        );
+
+        let response = handle_convert(State(state.clone()), headers, Bytes::from(body)).await;
+        let (parts, _) = response.into_response().into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let received = accept.await.expect("join");
+        assert_eq!(String::from_utf8_lossy(&received), zpl);
+
+        let entries = state.print_log.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].route, "/convert");
+        assert!(entries[0].ok);
     }
 }

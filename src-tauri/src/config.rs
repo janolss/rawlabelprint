@@ -108,6 +108,9 @@ pub struct AppConfig {
     /// so BrowserPrint.js clients work as a drop-in replacement.
     #[serde(default = "default_browser_print_compatible")]
     pub browser_print_compatible: bool,
+    /// When true, capture recent print requests in an in-memory ring buffer for Settings.
+    #[serde(default = "default_debug_logging")]
+    pub debug_logging: bool,
 }
 
 fn default_listen_address() -> String {
@@ -122,6 +125,10 @@ fn default_browser_print_compatible() -> bool {
     true
 }
 
+fn default_debug_logging() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -131,6 +138,7 @@ impl Default for AppConfig {
             added_printers: Vec::new(),
             launch_at_login: false,
             browser_print_compatible: default_browser_print_compatible(),
+            debug_logging: default_debug_logging(),
         }
     }
 }
