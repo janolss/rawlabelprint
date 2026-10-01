@@ -4,7 +4,7 @@ import {
   buildPrintLogHtml,
   escapeHtml,
   formatLogTime,
-} from "./print-log-view.js";
+} from "./print-log-view.ts";
 
 test("escapeHtml encodes markup", () => {
   assert.equal(escapeHtml(`<b>&"`), "&lt;b&gt;&amp;&quot;");
@@ -31,6 +31,7 @@ test("buildPrintLogHtml includes Send again and payload", () => {
         timestampMs: 1_700_000_000_000,
         printerName: "ZD421",
         printerAddress: "192.168.1.50",
+        printPort: 9100,
         dataBytes: 12,
         truncated: false,
         dataPreview: "^XA^FDHi^FS^XZ",
@@ -58,6 +59,7 @@ test("buildPrintLogHtml shows error state", () => {
         timestampMs: 1,
         printerName: "A",
         printerAddress: "10.0.0.1",
+        printPort: 9100,
         dataBytes: 100,
         truncated: true,
         dataPreview: "partial",

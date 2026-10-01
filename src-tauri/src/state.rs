@@ -170,8 +170,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-    use tokio::io::AsyncReadExt;
+    use crate::http_server::test_util::accept_one_payload;
 
     fn sample_printer(address: &str, print_port: u16) -> PrinterInfo {
         PrinterInfo {
@@ -184,20 +183,6 @@ mod tests {
             print_port,
             config_port: 80,
         }
-    }
-
-    async fn accept_one_payload(listener: tokio::net::TcpListener) -> Vec<u8> {
-        let (mut sock, _) = listener.accept().await.expect("accept");
-        let mut buf = Vec::new();
-        let mut tmp = [0u8; 4096];
-        loop {
-            match tokio::time::timeout(Duration::from_millis(200), sock.read(&mut tmp)).await {
-                Ok(Ok(0)) | Err(_) => break,
-                Ok(Ok(n)) => buf.extend_from_slice(&tmp[..n]),
-                Ok(Err(_)) => break,
-            }
-        }
-        buf
     }
 
     #[tokio::test]

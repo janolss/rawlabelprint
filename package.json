@@ -8,11 +8,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "test:ui": "node --test ui/print-log-view.test.js"
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml && npm run test:ui",
+    "test:ui": "node --import tsx --test ui/print-log-view.test.ts"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
     "vite": "^8"
   },
   "dependencies": {

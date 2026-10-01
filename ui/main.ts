@@ -1,61 +1,73 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { buildPrintLogHtml, escapeHtml } from "./print-log-view.js";
+import { buildPrintLogHtml, escapeHtml } from "./print-log-view.ts";
+import type {
+  AppConfig,
+  PrinterInfo,
+  PrinterStatus,
+  PrintLogEntry,
+  UiPrinterStatus,
+} from "./types.ts";
+
+function requireEl<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing element #${id}`);
+  return el as T;
+}
 
 const els = {
-  listenAddress: document.getElementById("listenAddress"),
-  port: document.getElementById("port"),
-  browserPrintCompatible: document.getElementById("browserPrintCompatible"),
-  debugLogging: document.getElementById("debugLogging"),
-  httpStatus: document.getElementById("httpStatus"),
-  saveHttpBtn: document.getElementById("saveHttpBtn"),
-  savedList: document.getElementById("savedList"),
-  searchBtn: document.getElementById("searchBtn"),
-  searchResults: document.getElementById("searchResults"),
-  manualName: document.getElementById("manualName"),
-  manualAddress: document.getElementById("manualAddress"),
-  manualPort: document.getElementById("manualPort"),
-  addManualBtn: document.getElementById("addManualBtn"),
-  launchAtLogin: document.getElementById("launchAtLogin"),
-  apiUrl: document.getElementById("apiUrl"),
-  printLogList: document.getElementById("printLogList"),
-  refreshPrintLogBtn: document.getElementById("refreshPrintLogBtn"),
-  clearPrintLogBtn: document.getElementById("clearPrintLogBtn"),
+  listenAddress: requireEl<HTMLInputElement>("listenAddress"),
+  port: requireEl<HTMLInputElement>("port"),
+  browserPrintCompatible: requireEl<HTMLInputElement>("browserPrintCompatible"),
+  debugLogging: requireEl<HTMLInputElement>("debugLogging"),
+  httpStatus: requireEl<HTMLElement>("httpStatus"),
+  saveHttpBtn: requireEl<HTMLButtonElement>("saveHttpBtn"),
+  savedList: requireEl<HTMLElement>("savedList"),
+  searchBtn: requireEl<HTMLButtonElement>("searchBtn"),
+  searchResults: requireEl<HTMLElement>("searchResults"),
+  manualName: requireEl<HTMLInputElement>("manualName"),
+  manualAddress: requireEl<HTMLInputElement>("manualAddress"),
+  manualPort: requireEl<HTMLInputElement>("manualPort"),
+  addManualBtn: requireEl<HTMLButtonElement>("addManualBtn"),
+  launchAtLogin: requireEl<HTMLInputElement>("launchAtLogin"),
+  apiUrl: requireEl<HTMLElement>("apiUrl"),
+  printLogList: requireEl<HTMLElement>("printLogList"),
+  refreshPrintLogBtn: requireEl<HTMLButtonElement>("refreshPrintLogBtn"),
+  clearPrintLogBtn: requireEl<HTMLButtonElement>("clearPrintLogBtn"),
 };
 
-let currentConfig = null;
-let lastDiscovered = [];
-/** @type {Map<string, { kind: "checking" | "online" | "offline"; detail?: string }>} */
-const printerStatuses = new Map();
+let currentConfig: AppConfig | null = null;
+let lastDiscovered: PrinterInfo[] = [];
+const printerStatuses = new Map<string, UiPrinterStatus>();
 let statusRefreshSeq = 0;
 
-function displayName(p) {
+function displayName(p: PrinterInfo): string {
   if (p.name && p.name.trim()) return p.name;
   if (p.model) return `${p.model} (${p.address})`;
   return p.address;
 }
 
-function defaultAddress() {
+function defaultAddress(): string | null {
   return currentConfig?.defaultPrinter?.address ?? null;
 }
 
-function updateApiUrl() {
+function updateApiUrl(): void {
   const host = els.listenAddress.value.trim() || "127.0.0.1";
   const port = els.port.value || "9100";
   els.apiUrl.textContent = `http://${host}:${port}/`;
 }
 
-async function refreshHttpStatus() {
+async function refreshHttpStatus(): Promise<void> {
   try {
-    const status = await invoke("get_http_status");
+    const status = await invoke<string>("get_http_status");
     els.httpStatus.textContent = `Status: ${status}`;
   } catch (e) {
     els.httpStatus.textContent = `Status: error (${e})`;
   }
 }
 
-function statusBadgeHtml(address) {
+function statusBadgeHtml(address: string): string {
   const entry = printerStatuses.get(address);
   const kind = entry?.kind ?? "checking";
   const detail = entry?.detail ? escapeHtml(entry.detail) : "";
@@ -68,8 +80,8 @@ function statusBadgeHtml(address) {
   return `<span class="badge neutral status-badge" data-status-address="${escapeHtml(address)}" role="button" tabindex="0" title="Checking…">…</span>`;
 }
 
-function updateStatusBadgeInDom(address) {
-  const el = [...els.savedList.querySelectorAll(".status-badge")].find(
+function updateStatusBadgeInDom(address: string): void {
+  const el = [...els.savedList.querySelectorAll<HTMLElement>(".status-badge")].find(
     (badge) => badge.dataset.statusAddress === address
   );
   if (!el) return;
@@ -91,12 +103,13 @@ function updateStatusBadgeInDom(address) {
   }
 }
 
-function findSavedPrinter(address) {
+function findSavedPrinter(address: string | undefined): PrinterInfo | undefined {
+  if (!address) return undefined;
   return (currentConfig?.addedPrinters || []).find((p) => p.address === address);
 }
 
-async function checkPrinterStatus(printer) {
-  const status = await invoke("check_printer_status", { printer });
+async function checkPrinterStatus(printer: PrinterInfo): Promise<UiPrinterStatus> {
+  const status = await invoke<PrinterStatus>("check_printer_status", { printer });
   if (status.status === "online") {
     return {
       kind: "online",
@@ -105,14 +118,11 @@ async function checkPrinterStatus(printer) {
   }
   return {
     kind: "offline",
-    detail:
-      status.detail ||
-      status.errorMessages?.join(", ") ||
-      "unreachable",
+    detail: status.detail || status.errorMessages?.join(", ") || "unreachable",
   };
 }
 
-async function refreshPrinterStatus(address) {
+async function refreshPrinterStatus(address: string): Promise<void> {
   const printer = findSavedPrinter(address);
   if (!printer) return;
   printerStatuses.set(address, { kind: "checking" });
@@ -129,7 +139,7 @@ async function refreshPrinterStatus(address) {
   updateStatusBadgeInDom(address);
 }
 
-async function refreshAllPrinterStatuses() {
+async function refreshAllPrinterStatuses(): Promise<void> {
   const printers = currentConfig?.addedPrinters || [];
   if (!printers.length) return;
   const seq = ++statusRefreshSeq;
@@ -157,12 +167,12 @@ async function refreshAllPrinterStatuses() {
   );
 }
 
-function bindStatusBadgeClicks(card) {
-  card.querySelectorAll(".status-badge").forEach((badge) => {
-    const run = (e) => {
+function bindStatusBadgeClicks(card: Element): void {
+  card.querySelectorAll<HTMLElement>(".status-badge").forEach((badge) => {
+    const run = (e: Event) => {
       e.preventDefault();
       const address = badge.dataset.statusAddress;
-      if (address) refreshPrinterStatus(address);
+      if (address) void refreshPrinterStatus(address);
     };
     badge.addEventListener("click", run);
     badge.addEventListener("keydown", (e) => {
@@ -171,7 +181,13 @@ function bindStatusBadgeClicks(card) {
   });
 }
 
-function renderSaved(list) {
+function fieldInput(card: Element, field: string): HTMLInputElement {
+  const input = card.querySelector<HTMLInputElement>(`[data-field="${field}"]`);
+  if (!input) throw new Error(`Missing field ${field}`);
+  return input;
+}
+
+function renderSaved(list: PrinterInfo[] | null | undefined): void {
   if (!list?.length) {
     els.savedList.innerHTML = `<div class="printer-card muted">No saved printers yet. Search on LAN or add manually.</div>`;
     return;
@@ -211,19 +227,20 @@ function renderSaved(list) {
     })
     .join("");
 
-  els.savedList.querySelectorAll(".saved-card").forEach((card) => {
+  els.savedList.querySelectorAll<HTMLElement>(".saved-card").forEach((card) => {
     const originalAddress = card.dataset.address;
     bindStatusBadgeClicks(card);
 
-    card.querySelector('[data-action="save"]').addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
+    const saveBtn = card.querySelector<HTMLButtonElement>('[data-action="save"]');
+    saveBtn?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
       btn.disabled = true;
       try {
-        currentConfig = await invoke("update_printer", {
+        currentConfig = await invoke<AppConfig>("update_printer", {
           originalAddress,
-          name: card.querySelector('[data-field="name"]').value.trim(),
-          address: card.querySelector('[data-field="address"]').value.trim(),
-          printPort: Number(card.querySelector('[data-field="printPort"]').value) || 9100,
+          name: fieldInput(card, "name").value.trim(),
+          address: fieldInput(card, "address").value.trim(),
+          printPort: Number(fieldInput(card, "printPort").value) || 9100,
         });
         applyConfig(currentConfig);
         await refreshAllPrinterStatuses();
@@ -234,21 +251,22 @@ function renderSaved(list) {
       }
     });
 
-    const defaultBtn = card.querySelector('[data-action="default"]');
+    const defaultBtn = card.querySelector<HTMLButtonElement>('[data-action="default"]');
     if (defaultBtn) {
       defaultBtn.addEventListener("click", async () => {
         const printer = findSavedPrinter(originalAddress);
         if (!printer) return;
-        currentConfig = await invoke("set_default_printer", { printer });
+        currentConfig = await invoke<AppConfig>("set_default_printer", { printer });
         applyConfig(currentConfig);
       });
     }
 
-    card.querySelector('[data-action="remove"]').addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
+    const removeBtn = card.querySelector<HTMLButtonElement>('[data-action="remove"]');
+    removeBtn?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
       if (btn.dataset.confirm !== "1") {
         btn.dataset.confirm = "1";
-        btn.dataset.originalLabel = btn.textContent;
+        btn.dataset.originalLabel = btn.textContent ?? "Remove";
         btn.textContent = "Confirm?";
         btn.classList.add("danger");
         const reset = () => {
@@ -262,8 +280,10 @@ function renderSaved(list) {
       }
       btn.disabled = true;
       try {
-        currentConfig = await invoke("remove_added_printer", { address: originalAddress });
-        printerStatuses.delete(originalAddress);
+        currentConfig = await invoke<AppConfig>("remove_added_printer", {
+          address: originalAddress,
+        });
+        if (originalAddress) printerStatuses.delete(originalAddress);
         applyConfig(currentConfig);
       } catch (err) {
         btn.disabled = false;
@@ -276,10 +296,10 @@ function renderSaved(list) {
   });
 }
 
-function applyConfig(config) {
+function applyConfig(config: AppConfig): void {
   currentConfig = config;
   els.listenAddress.value = config.listenAddress ?? "127.0.0.1";
-  els.port.value = config.port ?? 9100;
+  els.port.value = String(config.port ?? 9100);
   els.launchAtLogin.checked = !!config.launchAtLogin;
   els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
   els.debugLogging.checked = config.debugLogging !== false;
@@ -287,8 +307,8 @@ function applyConfig(config) {
   updateApiUrl();
 }
 
-async function persistSettings() {
-  return invoke("save_settings", {
+async function persistSettings(): Promise<AppConfig> {
+  return invoke<AppConfig>("save_settings", {
     listenAddress: els.listenAddress.value.trim() || "127.0.0.1",
     port: Number(els.port.value) || 9100,
     launchAtLogin: els.launchAtLogin.checked,
@@ -297,21 +317,21 @@ async function persistSettings() {
   });
 }
 
-function renderPrintLog(entries) {
+function renderPrintLog(entries: PrintLogEntry[]): void {
   els.printLogList.innerHTML = buildPrintLogHtml(entries);
 }
 
-async function refreshPrintLog() {
+async function refreshPrintLog(): Promise<void> {
   try {
-    const entries = await invoke("get_print_log");
+    const entries = await invoke<PrintLogEntry[]>("get_print_log");
     renderPrintLog(entries);
   } catch (e) {
     els.printLogList.innerHTML = `<div class="printer-card"><span class="badge bad">${escapeHtml(String(e))}</span></div>`;
   }
 }
 
-async function load() {
-  const config = await invoke("get_config");
+async function load(): Promise<void> {
+  const config = await invoke<AppConfig>("get_config");
   applyConfig(config);
   await refreshHttpStatus();
   await refreshAllPrinterStatuses();
@@ -372,7 +392,9 @@ els.clearPrintLogBtn.addEventListener("click", async () => {
 });
 
 els.printLogList.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-resend-id]");
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const btn = target.closest<HTMLButtonElement>("[data-resend-id]");
   if (!btn) return;
   const id = Number(btn.dataset.resendId);
   if (!Number.isFinite(id)) return;
@@ -393,7 +415,7 @@ els.searchBtn.addEventListener("click", async () => {
   els.searchResults.classList.remove("hidden");
   els.searchResults.innerHTML = `<div class="printer-card muted">Searching on UDP 4201 (≈5s)…</div>`;
   try {
-    lastDiscovered = await invoke("discover_printers");
+    lastDiscovered = await invoke<PrinterInfo[]>("discover_printers");
     if (!lastDiscovered.length) {
       els.searchResults.innerHTML = `<div class="printer-card muted">No printers found</div>`;
       return;
@@ -422,25 +444,26 @@ els.searchBtn.addEventListener("click", async () => {
       )
       .join("");
 
-    els.searchResults.querySelectorAll("[data-save-idx]").forEach((btn) => {
+    els.searchResults.querySelectorAll<HTMLButtonElement>("[data-save-idx]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const printer = lastDiscovered[Number(btn.dataset.saveIdx)];
-        currentConfig = await invoke("set_default_printer", { printer });
+        currentConfig = await invoke<AppConfig>("set_default_printer", { printer });
         applyConfig(currentConfig);
         els.searchResults.classList.add("hidden");
         await refreshAllPrinterStatuses();
       });
     });
 
-    els.searchResults.querySelectorAll("[data-test-idx]").forEach((btn) => {
+    els.searchResults.querySelectorAll<HTMLButtonElement>("[data-test-idx]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const idx = Number(btn.dataset.testIdx);
         const printer = lastDiscovered[idx];
         const statusEl = els.searchResults.querySelector(`[data-status-idx="${idx}"]`);
+        if (!statusEl) return;
         btn.disabled = true;
         statusEl.innerHTML = `<span class="badge neutral">Testing…</span>`;
         try {
-          const status = await invoke("check_printer_status", { printer });
+          const status = await invoke<PrinterStatus>("check_printer_status", { printer });
           statusEl.innerHTML = statusBadge(status);
         } catch (e) {
           statusEl.innerHTML = `<span class="badge bad">${escapeHtml(String(e))}</span>`;
@@ -450,11 +473,12 @@ els.searchBtn.addEventListener("click", async () => {
       });
     });
 
-    els.searchResults.querySelectorAll("[data-config-url]").forEach((link) => {
-      link.addEventListener("click", async (e) => {
-        e.preventDefault();
+    els.searchResults.querySelectorAll<HTMLAnchorElement>("[data-config-url]").forEach((link) => {
+      link.addEventListener("click", async (ev) => {
+        ev.preventDefault();
         try {
-          await openUrl(link.dataset.configUrl);
+          const url = link.dataset.configUrl;
+          if (url) await openUrl(url);
         } catch (err) {
           console.error(err);
         }
@@ -467,7 +491,7 @@ els.searchBtn.addEventListener("click", async () => {
   }
 });
 
-function statusBadge(status) {
+function statusBadge(status: PrinterStatus | null | undefined): string {
   if (!status) return "";
   const detail = status.detail ? ` ${escapeHtml(status.detail)}` : "";
   if (status.errorMessages?.length) {
@@ -490,7 +514,7 @@ els.addManualBtn.addEventListener("click", async () => {
   }
   els.addManualBtn.disabled = true;
   try {
-    currentConfig = await invoke("add_manual_printer", {
+    currentConfig = await invoke<AppConfig>("add_manual_printer", {
       name: els.manualName.value.trim(),
       address,
       printPort: Number(els.manualPort.value) || 9100,
@@ -498,7 +522,7 @@ els.addManualBtn.addEventListener("click", async () => {
     applyConfig(currentConfig);
     els.manualName.value = "";
     els.manualAddress.value = "";
-    els.manualPort.value = 9100;
+    els.manualPort.value = "9100";
     await refreshAllPrinterStatuses();
   } catch (e) {
     alert(String(e));
@@ -509,15 +533,15 @@ els.addManualBtn.addEventListener("click", async () => {
 
 els.port.addEventListener("input", updateApiUrl);
 
-document.querySelectorAll(".tab").forEach((tab) => {
+document.querySelectorAll<HTMLElement>(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     const name = tab.dataset.tab;
-    document.querySelectorAll(".tab").forEach((t) => {
+    document.querySelectorAll<HTMLElement>(".tab").forEach((t) => {
       const active = t.dataset.tab === name;
       t.classList.toggle("active", active);
       t.setAttribute("aria-selected", active ? "true" : "false");
     });
-    document.querySelectorAll(".tab-panel").forEach((panel) => {
+    document.querySelectorAll<HTMLElement>(".tab-panel").forEach((panel) => {
       const active = panel.dataset.panel === name;
       panel.classList.toggle("active", active);
       panel.hidden = !active;
@@ -531,7 +555,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
 getCurrentWindow()
   .onFocusChanged(({ payload: focused }) => {
     if (focused) {
-      refreshAllPrinterStatuses();
+      void refreshAllPrinterStatuses();
       refreshPrintLog().catch((e) => console.error(e));
     }
   })

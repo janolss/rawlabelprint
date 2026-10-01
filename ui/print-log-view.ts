@@ -1,6 +1,8 @@
 /** Pure helpers for Recent prints UI (kept separate for unit tests). */
 
-export function escapeHtml(value) {
+import type { PrintLogEntry } from "./types.ts";
+
+export function escapeHtml(value: unknown): string {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -8,7 +10,9 @@ export function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-export function formatLogTime(ms, now = Date) {
+type DateCtor = new (ms: number) => { toLocaleString(): string };
+
+export function formatLogTime(ms: number | null | undefined, now: DateCtor = Date): string {
   if (!ms) return "—";
   try {
     return new now(ms).toLocaleString();
@@ -17,7 +21,10 @@ export function formatLogTime(ms, now = Date) {
   }
 }
 
-export function buildPrintLogHtml(entries, { formatTime = formatLogTime } = {}) {
+export function buildPrintLogHtml(
+  entries: PrintLogEntry[] | null | undefined,
+  { formatTime = formatLogTime }: { formatTime?: (ms: number) => string } = {}
+): string {
   if (!entries?.length) {
     return `<div class="printer-card muted">No print requests captured yet</div>`;
   }
