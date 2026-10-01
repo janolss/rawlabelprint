@@ -57,7 +57,7 @@
       "deb": {
         "section": "utils",
         "files": {
-          "udev/99-rawlabelprint-zebra.rules": "/etc/udev/rules.d/99-rawlabelprint-zebra.rules"
+          "/etc/udev/rules.d/99-rawlabelprint-zebra.rules": "udev/99-rawlabelprint-zebra.rules"
         }
       }
     },
