@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { buildPrintLogHtml, escapeHtml } from "./print-log-view.js";
 
 const els = {
   listenAddress: document.getElementById("listenAddress"),
   port: document.getElementById("port"),
   browserPrintCompatible: document.getElementById("browserPrintCompatible"),
+  debugLogging: document.getElementById("debugLogging"),
   httpStatus: document.getElementById("httpStatus"),
   saveHttpBtn: document.getElementById("saveHttpBtn"),
   savedList: document.getElementById("savedList"),
@@ -17,6 +19,9 @@ const els = {
   addManualBtn: document.getElementById("addManualBtn"),
   launchAtLogin: document.getElementById("launchAtLogin"),
   apiUrl: document.getElementById("apiUrl"),
+  printLogList: document.getElementById("printLogList"),
+  refreshPrintLogBtn: document.getElementById("refreshPrintLogBtn"),
+  clearPrintLogBtn: document.getElementById("clearPrintLogBtn"),
 };
 
 let currentConfig = null;
@@ -24,14 +29,6 @@ let lastDiscovered = [];
 /** @type {Map<string, { kind: "checking" | "online" | "offline"; detail?: string }>} */
 const printerStatuses = new Map();
 let statusRefreshSeq = 0;
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function displayName(p) {
   if (p.name && p.name.trim()) return p.name;
@@ -285,6 +282,7 @@ function applyConfig(config) {
   els.port.value = config.port ?? 9100;
   els.launchAtLogin.checked = !!config.launchAtLogin;
   els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
+  els.debugLogging.checked = config.debugLogging !== false;
   renderSaved(config.addedPrinters || []);
   updateApiUrl();
 }
@@ -295,7 +293,21 @@ async function persistSettings() {
     port: Number(els.port.value) || 9100,
     launchAtLogin: els.launchAtLogin.checked,
     browserPrintCompatible: els.browserPrintCompatible.checked,
+    debugLogging: els.debugLogging.checked,
   });
+}
+
+function renderPrintLog(entries) {
+  els.printLogList.innerHTML = buildPrintLogHtml(entries);
+}
+
+async function refreshPrintLog() {
+  try {
+    const entries = await invoke("get_print_log");
+    renderPrintLog(entries);
+  } catch (e) {
+    els.printLogList.innerHTML = `<div class="printer-card"><span class="badge bad">${escapeHtml(String(e))}</span></div>`;
+  }
 }
 
 async function load() {
@@ -303,6 +315,7 @@ async function load() {
   applyConfig(config);
   await refreshHttpStatus();
   await refreshAllPrinterStatuses();
+  await refreshPrintLog();
 }
 
 els.saveHttpBtn.addEventListener("click", async () => {
@@ -331,6 +344,47 @@ els.browserPrintCompatible.addEventListener("change", async () => {
     currentConfig = await persistSettings();
   } catch (e) {
     console.error(e);
+  }
+});
+
+els.debugLogging.addEventListener("change", async () => {
+  try {
+    currentConfig = await persistSettings();
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+els.refreshPrintLogBtn.addEventListener("click", () => {
+  refreshPrintLog().catch((e) => console.error(e));
+});
+
+els.clearPrintLogBtn.addEventListener("click", async () => {
+  els.clearPrintLogBtn.disabled = true;
+  try {
+    await invoke("clear_print_log");
+    await refreshPrintLog();
+  } catch (e) {
+    console.error(e);
+  } finally {
+    els.clearPrintLogBtn.disabled = false;
+  }
+});
+
+els.printLogList.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-resend-id]");
+  if (!btn) return;
+  const id = Number(btn.dataset.resendId);
+  if (!Number.isFinite(id)) return;
+  btn.disabled = true;
+  try {
+    await invoke("resend_print_log", { id });
+    await refreshPrintLog();
+  } catch (err) {
+    console.error(err);
+    alert(`Resend failed: ${err}`);
+  } finally {
+    btn.disabled = false;
   }
 });
 
@@ -468,12 +522,18 @@ document.querySelectorAll(".tab").forEach((tab) => {
       panel.classList.toggle("active", active);
       panel.hidden = !active;
     });
+    if (name === "general") {
+      refreshPrintLog().catch((e) => console.error(e));
+    }
   });
 });
 
 getCurrentWindow()
   .onFocusChanged(({ payload: focused }) => {
-    if (focused) refreshAllPrinterStatuses();
+    if (focused) {
+      refreshAllPrinterStatuses();
+      refreshPrintLog().catch((e) => console.error(e));
+    }
   })
   .catch((e) => console.error(e));
 

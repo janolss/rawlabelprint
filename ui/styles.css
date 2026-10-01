@@ -248,6 +248,79 @@ button:disabled {
   margin-top: 10px;
 }
 
+.button-row.inline {
+  margin-top: 0;
+}
+
+.block-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.block-header-row .block-subtitle {
+  margin: 0;
+}
+
+.print-log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.print-log-entry {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.print-log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.print-log-meta strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.print-log-resend {
+  margin-left: auto;
+  padding: 4px 9px;
+  font-size: 0.78rem;
+}
+
+.print-log-entry pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f0f0f2;
+  border: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.print-log-error {
+  margin: 6px 0 0;
+  color: var(--bad);
+  font-size: 0.78rem;
+}
+
 .status {
   margin: 8px 0 10px;
   font-size: 0.85rem;

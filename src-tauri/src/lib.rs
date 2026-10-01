@@ -4,11 +4,13 @@ mod http_server;
 #[cfg(target_os = "macos")]
 mod local_network;
 mod print;
+mod print_log;
 mod state;
 
 use config::{load_config, AppConfig, PrinterInfo};
 use discovery::search_zebra_printers;
 use print::{get_printer_status, PrinterStatus};
+use print_log::PrintLogEntry;
 use state::AppState;
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
@@ -33,6 +35,7 @@ async fn save_settings(
     port: u16,
     launch_at_login: bool,
     browser_print_compatible: bool,
+    debug_logging: bool,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
     {
@@ -42,6 +45,7 @@ async fn save_settings(
         cfg.port = port;
         cfg.launch_at_login = launch_at_login;
         cfg.browser_print_compatible = browser_print_compatible;
+        cfg.debug_logging = debug_logging;
         drop(cfg);
         state.persist().await?;
         if restart_needed {
@@ -179,9 +183,47 @@ async fn test_print(
     };
     // Minimal ZPL test label
     let zpl = "^XA^FO50,50^A0N,40,40^FDRawLabelPrint OK^FS^XZ";
-    tauri::async_runtime::spawn_blocking(move || crate::print::send_raw_to_printer(&target, zpl))
-        .await
-        .map_err(|e| e.to_string())?
+    let name = target.display_name();
+    let address = target.address.clone();
+    let print_port = target.print_port;
+    let zpl_for_send = zpl.to_string();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::print::send_raw_to_printer(&target, &zpl_for_send)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    state
+        .record_print_log(
+            "test_print",
+            &name,
+            &address,
+            print_port,
+            zpl.as_bytes(),
+            result.clone(),
+        )
+        .await;
+    result
+}
+
+#[tauri::command]
+async fn get_print_log(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<PrintLogEntry>, String> {
+    Ok(state.print_log.list())
+}
+
+#[tauri::command]
+async fn clear_print_log(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.print_log.clear();
+    Ok(())
+}
+
+#[tauri::command]
+async fn resend_print_log(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: u64,
+) -> Result<(), String> {
+    state.resend_print_log(id).await
 }
 
 fn show_settings(app: &AppHandle) {
@@ -321,7 +363,10 @@ pub fn run() {
             update_printer,
             remove_added_printer,
             check_printer_status,
-            test_print
+            test_print,
+            get_print_log,
+            clear_print_log,
+            resend_print_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running RawLabelPrint");

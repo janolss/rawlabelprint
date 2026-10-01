@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:ui": "node --test ui/print-log-view.test.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
