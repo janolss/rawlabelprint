@@ -133,7 +133,7 @@ pub(crate) async fn handle_bp_config(State(state): State<HttpSharedState>) -> Re
                 "version": env!("CARGO_PKG_VERSION"),
                 "build_number": 1,
                 "api_level": 2,
-                "platform": "macOS",
+                "platform": std::env::consts::OS,
                 "supportedConversions": {}
             }
         })

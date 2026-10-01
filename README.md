@@ -1,10 +1,10 @@
 # RawLabelPrint
 
-macOS (Apple Silicon) tray app that replaces [Zebra Browser Print](https://www.zebra.com/us/en/products/software/barcode-printers/link-os/browser-print.html) for browser-based raw label printing.
+macOS (Apple Silicon) and Linux (Pop!_OS / Ubuntu 24.04+) tray app that replaces [Zebra Browser Print](https://www.zebra.com/us/en/products/software/barcode-printers/link-os/browser-print.html) for browser-based raw label printing.
 
 The app:
 
-- Lives in the menu bar (tray)
+- Lives in the menu bar / system tray
 - Exposes a localhost HTTP API (default `http://127.0.0.1:9100`)
 - Discovers Zebra printers on the LAN via UDP broadcast on port **4201** (Browser Print protocol)
 - Sends raw data (**ZPL/EPL/…**) **directly over TCP** to the printer print port (default **9100**) — not via CUPS
@@ -66,13 +66,13 @@ Device `uid` is the printer serial when known, otherwise `net:<ip>:<printPort>`.
 - **JSON** (from `device.send`): `{ "device": { "uid", … }, "data": "^XA…" }`
 - **multipart/form-data** (from `device.sendFile`): field `json` = `{ "device": { … } }`, field `blob` = raw bytes (ZPL/PDF/…)
 
-Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send` / `device.sendFile`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on Apple Silicon machines and official Browser Print elsewhere.
+Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send` / `device.sendFile`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on Apple Silicon or Linux machines and official Browser Print elsewhere.
 
 Disable Compatible mode in Settings if you only want the simple `/` API.
 
 ## Configure (Settings)
 
-1. Launch **RawLabelPrint** (menu bar icon appears).
+1. Launch **RawLabelPrint** (tray icon appears).
 2. Click the tray icon (or **Settings…**).
 3. Click **Search Zebra printers**, wait ~5 seconds, then **Set as default**.
 4. Optionally add a printer manually (name, IP, print port).
@@ -87,11 +87,18 @@ The app browses Bonjour (`_printer._tcp`) at startup to trigger that prompt (men
 
 UDP discovery can succeed while TCP `:9100` still fails with `No route to host (os error 65)` until Local Network is fully granted for the same `.app` you actually run (prefer one install: `/Applications/RawLabelPrint.app`, not a `target/release/...` copy).
 
-Config is stored at:
+### Linux system tray
 
-`~/Library/Application Support/se.rawlabelprint.desktop/config.json`
+Pop!_OS typically includes AppIndicator support. On plain GNOME without an AppIndicator extension, the tray icon may be missing — the app still runs and can be opened from the application menu (desktop entry).
 
-## Develop (on a Mac)
+### Config location
+
+- **macOS:** `~/Library/Application Support/se.rawlabelprint.desktop/config.json`
+- **Linux:** `~/.local/share/se.rawlabelprint.desktop/config.json`
+
+## Develop
+
+### macOS
 
 Prerequisites: Node.js 20+, Rust (stable), Xcode command line tools.
 
@@ -100,7 +107,30 @@ npm install
 npm run tauri dev
 ```
 
-## Build DMG for Apple Silicon
+### Linux (Pop!_OS / Ubuntu 24.04+)
+
+Prerequisites: Node.js 20+, Rust (stable), and:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  patchelf \
+  libssl-dev \
+  build-essential
+```
+
+```bash
+npm install
+npm run tauri dev
+```
+
+## Build
+
+### DMG for Apple Silicon
 
 On an Apple Silicon Mac:
 
@@ -132,6 +162,25 @@ For distribution outside your own Mac:
 3. Rebuild; Gatekeeper will accept the notarized DMG
 
 Without notarization: distribute the DMG and instruct users to **right-click → Open** the first time (or allow under System Settings → Privacy & Security). macOS may also ask for **Local Network** permission (required for UDP discovery / TCP print).
+
+### `.deb` for Linux (Pop!_OS / Ubuntu)
+
+On Ubuntu 24.04+ or Pop!_OS (with the Linux dependencies above):
+
+```bash
+npm install
+npm run tauri build
+```
+
+Artifact:
+
+- `src-tauri/target/release/bundle/deb/RawLabelPrint_*.deb`
+
+Install:
+
+```bash
+sudo apt install ./src-tauri/target/release/bundle/deb/RawLabelPrint_*.deb
+```
 
 ## Project layout
 

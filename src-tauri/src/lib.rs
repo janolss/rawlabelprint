@@ -321,9 +321,8 @@ pub fn run() {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(true)
                 .menu(&menu)
                 .tooltip("RawLabelPrint")
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -340,8 +339,11 @@ pub fn run() {
                     {
                         show_settings(tray.app_handle());
                     }
-                })
-                .build(app)?;
+                });
+            // Template icons are a macOS menu-bar convention; on Linux they often render blank/grey.
+            #[cfg(target_os = "macos")]
+            let tray = tray.icon_as_template(true);
+            let _tray = tray.build(app)?;
 
             // Close settings to tray instead of quitting
             if let Some(window) = app.get_webview_window("settings") {
