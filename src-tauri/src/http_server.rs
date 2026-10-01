@@ -929,6 +929,7 @@ mod tests {
             config: Arc::new(RwLock::new(config)),
             discovered: Arc::new(RwLock::new(discovered)),
             sessions: Arc::new(DeviceSessionPool::new()),
+            print_log: Arc::new(PrintLog::new()),
         }
     }
 
@@ -1241,7 +1242,7 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         assert_eq!(String::from_utf8_lossy(&received.lock().unwrap()), zpl);
     }
 
-    fn sample_printer(address: &str, print_port: u16) -> PrinterInfo {
+    fn lan_printer(address: &str, print_port: u16) -> PrinterInfo {
         PrinterInfo {
             name: Some("LanPrinter".into()),
             model: "ZD421".into(),
@@ -1290,7 +1291,7 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         let addr = listener.local_addr().unwrap();
         let accept = tokio::spawn(accept_one_payload(listener));
 
-        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), true).await;
+        let state = state_with_printer(lan_printer("127.0.0.1", addr.port()), true).await;
         let zpl = "^XA^FDHttpLog^FS^XZ";
         let body = do_print(&state, "", zpl).await.expect("print ok");
         assert!(body.contains("LanPrinter"));
@@ -1309,7 +1310,7 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
     #[tokio::test]
     async fn do_print_records_failure_in_print_log() {
         // Nothing listening — connection should fail and still be logged.
-        let state = state_with_printer(sample_printer("127.0.0.1", 1), true).await;
+        let state = state_with_printer(lan_printer("127.0.0.1", 1), true).await;
         let err = do_print(&state, "", "^XA^XZ").await.unwrap_err();
         assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
 
@@ -1325,7 +1326,7 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         let addr = listener.local_addr().unwrap();
         let accept = tokio::spawn(accept_one_payload(listener));
 
-        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), false).await;
+        let state = state_with_printer(lan_printer("127.0.0.1", addr.port()), false).await;
         do_print(&state, "", "^XA^XZ").await.expect("print ok");
         let _ = accept.await;
         assert!(state.print_log.list().is_empty());
@@ -1337,7 +1338,7 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         let addr = listener.local_addr().unwrap();
         let accept = tokio::spawn(accept_one_payload(listener));
 
-        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), true).await;
+        let state = state_with_printer(lan_printer("127.0.0.1", addr.port()), true).await;
         let zpl = "^XA^FDWriteLog^FS^XZ";
         let body = format!(
             r#"{{"device":{{"uid":"SERIAL1"}},"data":"{zpl}"}}"#
@@ -1367,7 +1368,7 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         let addr = listener.local_addr().unwrap();
         let accept = tokio::spawn(accept_one_payload(listener));
 
-        let state = state_with_printer(sample_printer("127.0.0.1", addr.port()), true).await;
+        let state = state_with_printer(lan_printer("127.0.0.1", addr.port()), true).await;
         let boundary = "----TestBoundary";
         let zpl = "^XA^FDConvert^FS^XZ";
         let body = format!(
