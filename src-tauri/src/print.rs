@@ -1,8 +1,8 @@
-//! Direct TCP RAW printing and HQES status check.
-//! Ported from reference/desktop/src/main.js `print-text` / `get-printer-config`.
-//! Also keeps short-lived TCP sessions for Browser Print write→read flows.
+//! RAW printing over TCP (LAN) or USB CDC/serial, plus HQES status.
+//! Also keeps short-lived sessions for Browser Print write→read flows.
 
 use crate::config::PrinterInfo;
+use crate::usb_discovery::find_port_path_by_serial;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -13,6 +13,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_millis(250);
 const SESSION_IDLE: Duration = Duration::from_secs(30);
+const USB_BAUD: u32 = 115_200;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,12 +28,62 @@ pub struct PrinterStatus {
     pub detail: Option<String>,
 }
 
+enum PrinterStream {
+    Tcp(TcpStream),
+    Serial(Box<dyn serialport::SerialPort>),
+}
+
+impl Read for PrinterStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(s) => s.read(buf),
+            Self::Serial(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for PrinterStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(s) => s.write(buf),
+            Self::Serial(s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(s) => s.flush(),
+            Self::Serial(s) => s.flush(),
+        }
+    }
+}
+
+impl PrinterStream {
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<(), String> {
+        match self {
+            Self::Tcp(s) => s.set_read_timeout(timeout).map_err(|e| e.to_string()),
+            Self::Serial(s) => s
+                .set_timeout(timeout.unwrap_or(Duration::from_millis(1)))
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> Result<(), String> {
+        match self {
+            Self::Tcp(s) => s.set_write_timeout(timeout).map_err(|e| e.to_string()),
+            Self::Serial(s) => s
+                .set_timeout(timeout.unwrap_or(IO_TIMEOUT))
+                .map_err(|e| e.to_string()),
+        }
+    }
+}
+
 struct DeviceSession {
-    stream: TcpStream,
+    stream: PrinterStream,
     last_used: Instant,
 }
 
-/// Open TCP sessions keyed by Browser Print device uid (write then read).
+/// Open I/O sessions keyed by Browser Print device uid (write then read).
 #[derive(Default)]
 pub struct DeviceSessionPool {
     inner: Mutex<HashMap<String, DeviceSession>>,
@@ -127,7 +178,44 @@ impl DeviceSessionPool {
     }
 }
 
-fn connect_printer(printer: &PrinterInfo) -> Result<TcpStream, String> {
+fn open_serial_path(path: &str) -> Result<Box<dyn serialport::SerialPort>, String> {
+    serialport::new(path, USB_BAUD)
+        .data_bits(serialport::DataBits::Eight)
+        .parity(serialport::Parity::None)
+        .stop_bits(serialport::StopBits::One)
+        .timeout(IO_TIMEOUT)
+        .open()
+        .map_err(|e| format_usb_open_error(path, &e))
+}
+
+fn format_usb_open_error(path: &str, err: &serialport::Error) -> String {
+    let base = format!("Could not open USB printer {path}: {err}");
+    #[cfg(target_os = "linux")]
+    {
+        if err.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) {
+            return format!(
+                "{base}. On Linux, install/reload the RawLabelPrint udev rule (Zebra VID 0a5f) or add your user to the dialout/lp group, then replug the printer"
+            );
+        }
+    }
+    base
+}
+
+fn connect_usb(printer: &PrinterInfo) -> Result<PrinterStream, String> {
+    match open_serial_path(&printer.address) {
+        Ok(port) => Ok(PrinterStream::Serial(port)),
+        Err(first_err) => {
+            if let Some(path) = find_port_path_by_serial(&printer.serial_number) {
+                if path != printer.address {
+                    return open_serial_path(&path).map(PrinterStream::Serial);
+                }
+            }
+            Err(first_err)
+        }
+    }
+}
+
+fn connect_tcp(printer: &PrinterInfo) -> Result<PrinterStream, String> {
     let addr: SocketAddr = format!("{}:{}", printer.address, printer.print_port)
         .parse()
         .map_err(|e| format!("Invalid printer address: {e}"))?;
@@ -135,7 +223,15 @@ fn connect_printer(printer: &PrinterInfo) -> Result<TcpStream, String> {
         .map_err(|e| format!("Could not connect to printer: {e}"))?;
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-    Ok(stream)
+    Ok(PrinterStream::Tcp(stream))
+}
+
+fn connect_printer(printer: &PrinterInfo) -> Result<PrinterStream, String> {
+    if printer.is_usb() {
+        connect_usb(printer)
+    } else {
+        connect_tcp(printer)
+    }
 }
 
 pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), String> {
@@ -144,9 +240,7 @@ pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), Stri
 
 pub fn send_raw_bytes_to_printer(printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
     let mut stream = connect_printer(printer)?;
-    stream
-        .set_write_timeout(Some(IO_TIMEOUT))
-        .map_err(|e| e.to_string())?;
+    stream.set_write_timeout(Some(IO_TIMEOUT))?;
     stream
         .write_all(data)
         .map_err(|e| format!("Failed writing to printer: {e}"))?;
@@ -179,7 +273,93 @@ fn network_access_hint() -> &'static str {
     }
 }
 
+fn read_hqes_response(stream: &mut PrinterStream) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 2048];
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 8192 || buf.windows(2).any(|w| w == b"\n\n" || w == b"\r\n") {
+                    break;
+                }
+            }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
+fn status_from_hqes(printer: &PrinterInfo, buf: &[u8]) -> PrinterStatus {
+    let mut status = PrinterStatus {
+        print_port: printer.print_port,
+        config_port: printer.config_port,
+        status: "unknown".into(),
+        error_messages: Vec::new(),
+        warning_messages: Vec::new(),
+        detail: None,
+    };
+    let response = String::from_utf8_lossy(buf);
+    let (errors, warnings) = decode_hqes(&response);
+    status.error_messages = errors;
+    status.warning_messages = warnings;
+    status.status = if status.error_messages.is_empty() {
+        "online".into()
+    } else {
+        "offline".into()
+    };
+    if buf.is_empty() {
+        status.detail = Some(format!(
+            "Connected to {} (no ~HQES response)",
+            printer.address
+        ));
+    }
+    status
+}
+
+fn get_usb_printer_status(printer: &PrinterInfo) -> PrinterStatus {
+    match connect_usb(printer) {
+        Ok(mut stream) => {
+            let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+            let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
+            if let Err(e) = stream.write_all(b"~HQES\r\n") {
+                return PrinterStatus {
+                    print_port: printer.print_port,
+                    config_port: printer.config_port,
+                    status: "offline".into(),
+                    error_messages: vec![format!("USB write failed: {e}")],
+                    warning_messages: Vec::new(),
+                    detail: Some(format!("Connected to {} but write failed", printer.address)),
+                };
+            }
+            let _ = stream.flush();
+            let buf = read_hqes_response(&mut stream);
+            status_from_hqes(printer, &buf)
+        }
+        Err(e) => PrinterStatus {
+            print_port: printer.print_port,
+            config_port: printer.config_port,
+            status: "offline".into(),
+            error_messages: vec![e.clone()],
+            warning_messages: Vec::new(),
+            detail: Some(e),
+        },
+    }
+}
+
 pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
+    if printer.is_usb() {
+        return get_usb_printer_status(printer);
+    }
+
     let config_port = if printer.config_port == 0 {
         80
     } else {
@@ -203,8 +383,8 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
     };
 
     match TcpStream::connect_timeout(&print_addr, CONNECT_TIMEOUT) {
-        Ok(mut stream) => {
-            // Short read timeout: printers often keep the RAW socket open after ~HQES.
+        Ok(tcp) => {
+            let mut stream = PrinterStream::Tcp(tcp);
             let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
             let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
             if let Err(e) = stream.write_all(b"~HQES\r\n") {
@@ -213,48 +393,16 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
                 return status;
             }
             let _ = stream.flush();
-
-            let mut buf = Vec::new();
-            let mut chunk = [0u8; 2048];
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                match stream.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        buf.extend_from_slice(&chunk[..n]);
-                        if buf.len() > 8192 || buf.windows(2).any(|w| w == b"\n\n" || w == b"\r\n")
-                        {
-                            // Likely complete HQES reply; don't wait for socket close.
-                            break;
-                        }
-                    }
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::WouldBlock
-                            || e.kind() == std::io::ErrorKind::TimedOut =>
-                    {
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            let response = String::from_utf8_lossy(&buf);
-            let (errors, warnings) = decode_hqes(&response);
-            status.error_messages = errors;
-            status.warning_messages = warnings;
-            // Reachable RAW port counts as online even if ~HQES is empty/unsupported.
-            status.status = if status.error_messages.is_empty() {
-                "online".into()
-            } else {
-                "offline".into()
-            };
+            let buf = read_hqes_response(&mut stream);
+            let mut probed = status_from_hqes(printer, &buf);
+            probed.config_port = config_port;
             if buf.is_empty() {
-                status.detail = Some(format!(
+                probed.detail = Some(format!(
                     "Connected to {}:{} (no ~HQES response)",
                     printer.address, printer.print_port
                 ));
             }
-            status
+            probed
         }
         Err(e) => {
             let print_err = format!("TCP {}:{} — {e}", printer.address, printer.print_port);
@@ -325,6 +473,7 @@ fn extract_hex_flags(line: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::CONNECTION_NETWORK;
     use std::io::Read;
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -392,6 +541,7 @@ mod tests {
             port: 0,
             print_port: port,
             config_port: 80,
+            connection: CONNECTION_NETWORK.into(),
         };
         let zpl = b"^XA^FDHi^FS^XZ";
         {

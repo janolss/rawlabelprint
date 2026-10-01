@@ -184,7 +184,11 @@ function renderSaved(list: PrinterInfo[] | null | undefined): void {
           originalAddress,
           name: fieldInput(card, "name").value.trim(),
           address: fieldInput(card, "address").value.trim(),
-          printPort: Number(fieldInput(card, "printPort").value) || 9100,
+          printPort: (() => {
+            const portEl = card.querySelector<HTMLInputElement>('[data-field="printPort"]');
+            if (!portEl) return 0;
+            return Number(portEl.value) || 9100;
+          })(),
         });
         applyConfig(currentConfig);
         await refreshAllPrinterStatuses();

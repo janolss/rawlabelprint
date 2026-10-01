@@ -7,7 +7,8 @@ The app:
 - Lives in the menu bar / system tray
 - Exposes a localhost HTTP API (default `http://127.0.0.1:9100`)
 - Discovers Zebra printers on the LAN via UDP broadcast on port **4201** (Browser Print protocol)
-- Sends raw data (**ZPL/EPL/…**) **directly over TCP** to the printer print port (default **9100**) — not via CUPS
+- Discovers Zebra **USB** printers that expose a CDC/ACM serial port (USB vendor ID `0x0A5F`)
+- Sends raw data (**ZPL/EPL/…**) **directly** over TCP `:9100` (network) or USB serial — not via CUPS
 - Optional **Compatible mode**: same HTTP surface as Zebra Browser Print so existing `BrowserPrint.js` pages work as a drop-in in mixed environments
 
 ## Quick start (simple API)
@@ -59,7 +60,7 @@ Enabled by default in Settings (“Compatible mode”). When on, the same endpoi
 | POST | `/convert` | BrowserPrint convert / `convertAndSendFile` (raw ZPL passthrough; image/PDF conversion not supported) |
 | POST | `/convert/scan` | BrowserPrint `scanImage` stub (same limits as `/convert`) |
 
-Device `uid` is the printer serial when known, otherwise `net:<ip>:<printPort>`.
+Device `uid` is the printer serial when known, otherwise `net:<ip>:<printPort>` (network) or `usb:<device-path>` (USB).
 
 `/write` accepts both BrowserPrint body styles:
 
@@ -74,11 +75,30 @@ Disable Compatible mode in Settings if you only want the simple `/` API.
 
 1. Launch **RawLabelPrint** (tray icon appears).
 2. Click the tray icon (or **Settings…**).
-3. Click **Search Zebra printers**, wait ~5 seconds, then **Set as default**.
-4. Optionally add a printer manually (name, IP, print port).
+3. Click **Search Zebra printers**, wait ~5 seconds (LAN + USB), then **Save & set default**.
+4. Optionally add a **network** printer manually (name, IP, print port). USB printers come from Search.
 5. Adjust HTTP port if needed and **Save & apply** (bind address is fixed to `127.0.0.1`).
 6. Keep **Compatible mode** on for BrowserPrint.js clients.
 7. Optional: enable **Launch at login**.
+
+### USB printers (macOS & Linux)
+
+USB support targets Zebra printers that appear as a **CDC/ACM serial** device (not CUPS queues, not bare `usblp`-only devices).
+
+1. Connect the printer over USB and run **Search Zebra printers**.
+2. Save the USB result as default (or keep it in Saved printers).
+3. Print via the usual localhost API / BrowserPrint.js — transport is chosen from the saved `connection` field.
+
+**Linux permissions:** the `.deb` installs `/etc/udev/rules.d/99-rawlabelprint-zebra.rules` so VID `0a5f` is accessible without root. After installing the package, replug the printer or run:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+If open still fails with permission denied, ensure the rule is present or add your user to `dialout` / `lp`, then replug.
+
+**macOS:** CDC devices usually appear under `/dev/cu.usbmodem…` with no extra setup.
 
 ### macOS Local Network
 
@@ -120,6 +140,7 @@ sudo apt-get install -y \
   librsvg2-dev \
   patchelf \
   libssl-dev \
+  libudev-dev \
   build-essential
 ```
 
@@ -187,12 +208,13 @@ sudo apt install ./src-tauri/target/release/bundle/deb/RawLabelPrint_*.deb
 | Path | Role |
 |---|---|
 | `ui/` | Settings UI (Vite + vanilla JS) |
-| `src-tauri/` | Rust: tray, HTTP API, UDP discovery, TCP print |
+| `src-tauri/` | Rust: tray, HTTP API, UDP/USB discovery, TCP/USB print |
+| `src-tauri/udev/` | Linux udev rule for Zebra USB (packaged in `.deb`) |
 | `test/` | Browser API smoke-test page |
 | `reference/` | Reference implementations (local only, gitignored) |
 
 ## Notes
 
 - Do not run Zebra Browser Print at the same time (both use UDP **4201** / HTTP **9100**).
-- Printers must be reachable on the LAN (Wi‑Fi/Ethernet). USB-only printers are out of scope for this version.
+- Network printers must be reachable on the LAN (Wi‑Fi/Ethernet). USB printers need a CDC/ACM serial interface (Zebra VID `0x0A5F`); CUPS-only / `usblp`-only devices are out of scope for this MVP.
 - HTTPS on port **9101** (Safari + https pages) is not implemented yet; use HTTP pages or Chrome against port **9100**.

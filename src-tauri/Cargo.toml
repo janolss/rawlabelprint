@@ -1,7 +1,7 @@
 [package]
 name = "rawlabelprint"
 version = "0.1.0"
-description = "Raw label printing tray app for macOS and Linux (Zebra LAN printers)"
+description = "Raw label printing tray app for macOS and Linux (Zebra LAN/USB printers)"
 authors = ["RawLabelPrint"]
 edition = "2021"
 
@@ -22,6 +22,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
 if-addrs = "0.13"
+serialport = "4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

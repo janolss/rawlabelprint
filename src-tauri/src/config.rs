@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const CONNECTION_NETWORK: &str = "network";
+pub const CONNECTION_USB: &str = "usb";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrinterInfo {
@@ -13,6 +16,7 @@ pub struct PrinterInfo {
     pub firmware: String,
     #[serde(default)]
     pub serial_number: String,
+    /// IP for network printers, or serial device path for USB (e.g. `/dev/ttyACM0`).
     pub address: String,
     /// UDP source port from discovery (informational).
     #[serde(default)]
@@ -21,6 +25,9 @@ pub struct PrinterInfo {
     pub print_port: u16,
     #[serde(default = "default_config_port")]
     pub config_port: u16,
+    /// `"network"` (TCP RAW) or `"usb"` (CDC/serial).
+    #[serde(default = "default_connection")]
+    pub connection: String,
 }
 
 fn default_print_port() -> u16 {
@@ -31,7 +38,23 @@ fn default_config_port() -> u16 {
     80
 }
 
+fn default_connection() -> String {
+    CONNECTION_NETWORK.into()
+}
+
 impl PrinterInfo {
+    pub fn is_usb(&self) -> bool {
+        self.connection.eq_ignore_ascii_case(CONNECTION_USB)
+    }
+
+    pub fn browser_print_connection(&self) -> &'static str {
+        if self.is_usb() {
+            CONNECTION_USB
+        } else {
+            CONNECTION_NETWORK
+        }
+    }
+
     pub fn display_name(&self) -> String {
         if let Some(name) = &self.name {
             if !name.trim().is_empty() {
@@ -75,6 +98,9 @@ impl PrinterInfo {
         if !self.serial_number.trim().is_empty() {
             return self.serial_number.clone();
         }
+        if self.is_usb() {
+            return format!("usb:{}", self.address);
+        }
         format!("net:{}:{}", self.address, self.print_port)
     }
 
@@ -83,7 +109,7 @@ impl PrinterInfo {
             "deviceType": "printer",
             "uid": self.browser_print_uid(),
             "name": self.display_name(),
-            "connection": "network",
+            "connection": self.browser_print_connection(),
             "version": 2,
             "provider": "com.zebra.ds.webdriver.desktop.provider.DefaultDeviceProvider",
             "manufacturer": "Zebra Technologies"
@@ -208,7 +234,13 @@ impl AppConfig {
         let mut printer = self.added_printers[idx].clone();
         printer.name = name.filter(|n| !n.trim().is_empty());
         printer.address = address.clone();
-        printer.print_port = if print_port == 0 { 9100 } else { print_port };
+        if printer.is_usb() {
+            // USB uses CDC path in `address`; print_port stays unused (0).
+            printer.print_port = 0;
+            printer.config_port = 0;
+        } else {
+            printer.print_port = if print_port == 0 { 9100 } else { print_port };
+        }
 
         let was_default = self
             .default_printer
@@ -260,6 +292,7 @@ mod tests {
             port: 0,
             print_port: 9100,
             config_port: 80,
+            connection: CONNECTION_NETWORK.into(),
         }
     }
 
@@ -274,6 +307,7 @@ mod tests {
             port: 0,
             print_port: 9100,
             config_port: 80,
+            connection: CONNECTION_NETWORK.into(),
         };
         assert_eq!(p.display_name(), "Shipping");
         assert!(p.matches_name("shipping"));
@@ -310,6 +344,16 @@ mod tests {
 
         let without = sample_printer("10.0.0.5", "");
         assert_eq!(without.browser_print_uid(), "net:10.0.0.5:9100");
+
+        let usb = PrinterInfo {
+            connection: CONNECTION_USB.into(),
+            print_port: 0,
+            config_port: 0,
+            address: "/dev/ttyACM0".into(),
+            ..sample_printer("/dev/ttyACM0", "")
+        };
+        assert_eq!(usb.browser_print_uid(), "usb:/dev/ttyACM0");
+        assert_eq!(usb.browser_print_connection(), CONNECTION_USB);
     }
 
     #[test]

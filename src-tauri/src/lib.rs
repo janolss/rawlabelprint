@@ -6,9 +6,9 @@ mod local_network;
 mod print;
 mod print_log;
 mod state;
+mod usb_discovery;
 
-use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo};
-use discovery::search_zebra_printers;
+use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo, CONNECTION_NETWORK};
 use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogEntry;
 use state::AppState;
@@ -17,6 +17,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use usb_discovery::search_all_printers;
 
 /// LaunchAgent must not point at `target/debug` (breaks Local Network / identity).
 fn autostart_registration_allowed() -> bool {
@@ -77,7 +78,7 @@ async fn save_settings(
 async fn discover_printers(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Vec<PrinterInfo>, String> {
-    let printers = tauri::async_runtime::spawn_blocking(search_zebra_printers)
+    let printers = tauri::async_runtime::spawn_blocking(search_all_printers)
         .await
         .map_err(|e| e.to_string())??;
     *state.discovered.write().await = printers.clone();
@@ -120,6 +121,7 @@ async fn add_manual_printer(
         port: 0,
         print_port: if print_port == 0 { 9100 } else { print_port },
         config_port: 80,
+        connection: CONNECTION_NETWORK.into(),
     };
     {
         let mut cfg = state.config.write().await;
@@ -285,7 +287,7 @@ pub fn run() {
                 }
             });
 
-            // Background LAN discovery so Browser Print /available is populated
+            // Background LAN/USB discovery so Browser Print /available is populated
             let state_for_discovery = state.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
@@ -295,7 +297,7 @@ pub fn run() {
                         .await
                         .browser_print_compatible;
                     if enabled {
-                        match tauri::async_runtime::spawn_blocking(search_zebra_printers).await {
+                        match tauri::async_runtime::spawn_blocking(search_all_printers).await {
                             Ok(Ok(printers)) => {
                                 *state_for_discovery.discovered.write().await = printers;
                             }

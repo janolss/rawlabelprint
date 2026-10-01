@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::config::{AppConfig, PrinterInfo};
+use crate::config::{AppConfig, PrinterInfo, CONNECTION_NETWORK};
 use crate::http_server::{build_app_router, HttpSharedState};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
@@ -21,6 +21,7 @@ pub(crate) fn sample_printer(address: &str, serial: &str) -> PrinterInfo {
         port: 0,
         print_port: 9100,
         config_port: 80,
+        connection: CONNECTION_NETWORK.into(),
     }
 }
 
@@ -34,6 +35,7 @@ pub(crate) fn lan_printer(address: &str, print_port: u16) -> PrinterInfo {
         port: 0,
         print_port,
         config_port: 80,
+        connection: CONNECTION_NETWORK.into(),
     }
 }
 
