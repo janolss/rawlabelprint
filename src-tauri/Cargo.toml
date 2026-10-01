@@ -1,6 +1,6 @@
 [package]
 name = "rawlabelprint"
-version = "0.1.0"
+version = "0.2.0"
 description = "Raw label printing tray app for macOS and Linux (Zebra LAN/USB printers)"
 authors = ["RawLabelPrint"]
 edition = "2021"

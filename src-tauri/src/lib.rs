@@ -13,7 +13,7 @@ use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogEntry;
 use state::AppState;
 use std::sync::Arc;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
@@ -319,16 +319,22 @@ pub fn run() {
 
             app.manage(state);
 
+            // Keep enabled so the label uses normal menu text color (disabled items are
+            // nearly invisible on macOS dark menu bar menus).
+            let app_name_i =
+                MenuItem::with_id(app, "app_name", "RawLabelPrint", true, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
             let show_i = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &quit_i])?;
 
+            let tray_tooltip = format!("RawLabelPrint {}", env!("CARGO_PKG_VERSION"));
             let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .tooltip("RawLabelPrint")
+                .tooltip(&tray_tooltip)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "settings" => show_settings(app),
+                    "app_name" | "settings" => show_settings(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
