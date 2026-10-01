@@ -18,6 +18,11 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
+/// LaunchAgent must not point at `target/debug` (breaks Local Network / identity).
+fn autostart_registration_allowed() -> bool {
+    !cfg!(debug_assertions)
+}
+
 #[tauri::command]
 async fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Result<AppConfig, String> {
     Ok(state.config.read().await.clone())
@@ -54,13 +59,15 @@ async fn save_settings(
         }
     }
 
-    // Keep autostart plugin in sync
+    // Keep autostart plugin in sync (never register the debug binary).
     use tauri_plugin_autostart::ManagerExt;
     let autostart = app.autolaunch();
-    if launch_at_login {
+    if launch_at_login && autostart_registration_allowed() {
         let _ = autostart.enable();
-    } else {
+    } else if !launch_at_login {
         let _ = autostart.disable();
+    } else {
+        tracing::info!("Skipping autostart enable in debug/dev build");
     }
 
     Ok(state.config.read().await.clone())
@@ -300,13 +307,12 @@ pub fn run() {
                 }
             });
 
-            // Sync autostart with saved preference
-            {
+            // Sync autostart with saved preference (release builds only).
+            if config.launch_at_login && autostart_registration_allowed() {
                 use tauri_plugin_autostart::ManagerExt;
-                let autostart = app.autolaunch();
-                if config.launch_at_login {
-                    let _ = autostart.enable();
-                }
+                let _ = app.autolaunch().enable();
+            } else if config.launch_at_login {
+                tracing::info!("Skipping autostart sync in debug/dev build");
             }
 
             app.manage(state);

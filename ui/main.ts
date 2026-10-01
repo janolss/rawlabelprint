@@ -245,6 +245,14 @@ function applyConfig(config: AppConfig): void {
   els.listenAddress.value = "127.0.0.1";
   els.port.value = String(config.port ?? 9100);
   els.launchAtLogin.checked = !!config.launchAtLogin;
+  // Dev (`tauri dev`) must not register LaunchAgent against target/debug.
+  if (import.meta.env.DEV) {
+    els.launchAtLogin.disabled = true;
+    els.launchAtLogin.title = "Disabled while running via tauri dev";
+  } else {
+    els.launchAtLogin.disabled = false;
+    els.launchAtLogin.removeAttribute("title");
+  }
   els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
   els.debugLogging.checked = config.debugLogging !== false;
   renderSaved(config.addedPrinters || []);
@@ -296,6 +304,10 @@ els.saveHttpBtn.addEventListener("click", async () => {
 });
 
 els.launchAtLogin.addEventListener("change", async () => {
+  if (import.meta.env.DEV) {
+    els.launchAtLogin.checked = !!currentConfig?.launchAtLogin;
+    return;
+  }
   try {
     currentConfig = await persistSettings();
   } catch (e) {

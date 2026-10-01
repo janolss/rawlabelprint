@@ -89,7 +89,7 @@ UDP discovery can succeed while TCP `:9100` still fails with `No route to host (
 
 Config is stored at:
 
-`~/Library/Application Support/se.rawlabelprint.app/config.json`
+`~/Library/Application Support/se.rawlabelprint.desktop/config.json`
 
 ## Develop (on a Mac)
 
@@ -114,10 +114,21 @@ Artifacts:
 - `src-tauri/target/release/bundle/macos/RawLabelPrint.app`
 - `src-tauri/target/release/bundle/dmg/RawLabelPrint_*.dmg`
 
-### Signing / notarization (recommended for distribution)
+### Signing / notarization
 
-1. Apple Developer ID Application certificate
-2. Configure Tauri signing env vars (`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, …) — see [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/)
+Set the signing identity via environment variable (do **not** commit it in `tauri.conf.json`):
+
+```bash
+export APPLE_SIGNING_IDENTITY="Apple Development: you@example.com (TEAMID)"
+npm run tauri build
+```
+
+List available identities with `security find-identity -v -p codesigning`. Or put the export in a local untracked file (e.g. `.envrc` / direnv). The env var overrides `bundle.macOS.signingIdentity` if that key is ever set.
+
+For distribution outside your own Mac:
+
+1. Apple **Developer ID Application** certificate
+2. Configure notarization env vars (`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, …) — see [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/)
 3. Rebuild; Gatekeeper will accept the notarized DMG
 
 Without notarization: distribute the DMG and instruct users to **right-click → Open** the first time (or allow under System Settings → Privacy & Security). macOS may also ask for **Local Network** permission (required for UDP discovery / TCP print).
