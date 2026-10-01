@@ -1,10 +1,11 @@
-/** Pure HTML builders for LAN search results. */
+/** Pure HTML builders for LAN/USB search results. */
 
 import { escapeHtml } from "./print-log-view.ts";
+import { isUsbPrinter } from "./printer-utils.ts";
 import type { PrinterInfo, PrinterStatus } from "./types.ts";
 
 export function buildSearchingHtml(): string {
-  return `<div class="printer-card muted">Searching on UDP 4201 (≈5s)…</div>`;
+  return `<div class="printer-card muted">Searching LAN (UDP 4201) and USB…</div>`;
 }
 
 export function buildNoPrintersHtml(): string {
@@ -17,27 +18,38 @@ export function buildSearchErrorHtml(error: unknown): string {
 
 export function buildSearchResultsHtml(printers: PrinterInfo[]): string {
   return printers
-    .map(
-      (p, idx) => `
-      <div class="result-card">
-        <h3>
+    .map((p, idx) => {
+      const usb = isUsbPrinter(p);
+      const title = escapeHtml(p.model || p.address);
+      const heading = usb
+        ? `<h3>${title}</h3>`
+        : `<h3>
           <a href="#" data-config-url="http://${escapeHtml(p.address)}:${escapeHtml(p.configPort)}">
-            ${escapeHtml(p.model || p.address)}
+            ${title}
           </a>
-        </h3>
-        <p class="result-meta">
-          IP: ${escapeHtml(p.address)}<br />
+        </h3>`;
+      const meta = usb
+        ? `Connection: USB<br />
+          Device: ${escapeHtml(p.address)}<br />
+          Serial: ${escapeHtml(p.serialNumber || "—")}`
+        : `IP: ${escapeHtml(p.address)}<br />
           Firmware: ${escapeHtml(p.firmware || "—")}<br />
           Serial: ${escapeHtml(p.serialNumber || "—")}<br />
-          Print port: ${escapeHtml(p.printPort)}
+          Print port: ${escapeHtml(p.printPort)}`;
+      return `
+      <div class="result-card">
+        ${heading}
+        <p class="result-meta">
+          <span class="badge neutral">${usb ? "USB" : "Network"}</span><br />
+          ${meta}
         </p>
         <div class="button-row">
           <button type="button" data-test-idx="${idx}">Test connection</button>
           <button type="button" class="primary" data-save-idx="${idx}">Save &amp; set default</button>
         </div>
         <div class="conn-status" data-status-idx="${idx}"></div>
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
 }
 

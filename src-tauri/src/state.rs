@@ -104,6 +104,7 @@ impl AppState {
                 entry.print_port
             },
             config_port: 80,
+            connection: crate::config::CONNECTION_NETWORK.into(),
         }
     }
 
@@ -185,6 +186,7 @@ mod tests {
             port: 0,
             print_port,
             config_port: 80,
+            connection: crate::config::CONNECTION_NETWORK.into(),
         }
     }
 

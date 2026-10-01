@@ -9,6 +9,8 @@ export interface PrinterInfo {
   port?: number;
   printPort: number;
   configPort: number;
+  /** `"network"` (TCP) or `"usb"` (CDC/serial). Defaults to network. */
+  connection?: string;
 }
 
 export interface AppConfig {

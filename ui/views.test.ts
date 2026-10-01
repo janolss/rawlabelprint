@@ -62,6 +62,20 @@ test("search results builders", () => {
   assert.match(html, /data-test-idx="0"/);
   assert.match(html, /data-config-url="http:\/\/10\.0\.0\.5:80"/);
   assert.match(html, /SN1/);
+  assert.match(html, />Network</);
+
+  const usbHtml = buildSearchResultsHtml([
+    {
+      ...sample,
+      connection: "usb",
+      address: "/dev/ttyACM0",
+      printPort: 0,
+      configPort: 0,
+    },
+  ]);
+  assert.match(usbHtml, />USB</);
+  assert.doesNotMatch(usbHtml, /data-config-url/);
+  assert.match(usbHtml, /\/dev\/ttyACM0/);
 });
 
 test("connectionStatusBadgeHtml online and offline", () => {

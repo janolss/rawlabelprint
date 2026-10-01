@@ -6,17 +6,18 @@ mod local_network;
 mod print;
 mod print_log;
 mod state;
+mod usb_discovery;
 
-use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo};
-use discovery::search_zebra_printers;
+use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo, CONNECTION_NETWORK};
 use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogEntry;
 use state::AppState;
 use std::sync::Arc;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use usb_discovery::search_all_printers;
 
 /// LaunchAgent must not point at `target/debug` (breaks Local Network / identity).
 fn autostart_registration_allowed() -> bool {
@@ -77,7 +78,7 @@ async fn save_settings(
 async fn discover_printers(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Vec<PrinterInfo>, String> {
-    let printers = tauri::async_runtime::spawn_blocking(search_zebra_printers)
+    let printers = tauri::async_runtime::spawn_blocking(search_all_printers)
         .await
         .map_err(|e| e.to_string())??;
     *state.discovered.write().await = printers.clone();
@@ -120,6 +121,7 @@ async fn add_manual_printer(
         port: 0,
         print_port: if print_port == 0 { 9100 } else { print_port },
         config_port: 80,
+        connection: CONNECTION_NETWORK.into(),
     };
     {
         let mut cfg = state.config.write().await;
@@ -285,7 +287,7 @@ pub fn run() {
                 }
             });
 
-            // Background LAN discovery so Browser Print /available is populated
+            // Background LAN/USB discovery so Browser Print /available is populated
             let state_for_discovery = state.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
@@ -295,7 +297,7 @@ pub fn run() {
                         .await
                         .browser_print_compatible;
                     if enabled {
-                        match tauri::async_runtime::spawn_blocking(search_zebra_printers).await {
+                        match tauri::async_runtime::spawn_blocking(search_all_printers).await {
                             Ok(Ok(printers)) => {
                                 *state_for_discovery.discovered.write().await = printers;
                             }
@@ -317,16 +319,22 @@ pub fn run() {
 
             app.manage(state);
 
+            // Keep enabled so the label uses normal menu text color (disabled items are
+            // nearly invisible on macOS dark menu bar menus).
+            let app_name_i =
+                MenuItem::with_id(app, "app_name", "RawLabelPrint", true, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
             let show_i = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &quit_i])?;
 
+            let tray_tooltip = format!("RawLabelPrint {}", env!("CARGO_PKG_VERSION"));
             let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .tooltip("RawLabelPrint")
+                .tooltip(&tray_tooltip)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "settings" => show_settings(app),
+                    "app_name" | "settings" => show_settings(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })

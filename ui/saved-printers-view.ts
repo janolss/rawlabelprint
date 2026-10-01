@@ -1,7 +1,7 @@
 /** Pure HTML builders for the Saved printers section. */
 
 import { escapeHtml } from "./print-log-view.ts";
-import { displayName } from "./printer-utils.ts";
+import { displayName, isUsbPrinter } from "./printer-utils.ts";
 import type { PrinterInfo, UiPrinterStatus } from "./types.ts";
 
 export function statusBadgeHtml(
@@ -47,18 +47,26 @@ export function buildSavedPrintersHtml(
   statuses: Map<string, UiPrinterStatus>
 ): string {
   if (!list?.length) {
-    return `<div class="printer-card muted">No saved printers yet. Search on LAN or add manually.</div>`;
+    return `<div class="printer-card muted">No saved printers yet. Search on LAN/USB or add manually.</div>`;
   }
 
   return list
     .map((p) => {
       const isDefault = p.address === defaultAddress;
       const nameValue = p.name?.trim() ? p.name : "";
+      const usb = isUsbPrinter(p);
+      const portRow = usb
+        ? ""
+        : `<div class="row">
+          <label>Print port</label>
+          <input type="number" data-field="printPort" min="1" max="65535" value="${escapeHtml(p.printPort)}" />
+        </div>`;
       return `
       <div class="saved-card" data-address="${escapeHtml(p.address)}">
         <div class="saved-header">
           <strong>${escapeHtml(displayName(p))}</strong>
           ${isDefault ? `<span class="badge ok">Default</span>` : ""}
+          <span class="badge neutral">${usb ? "USB" : "Network"}</span>
           ${statusBadgeHtml(p.address, statuses)}
           ${p.model && p.model !== "Manual" ? `<span class="badge neutral">${escapeHtml(p.model)}</span>` : ""}
         </div>
@@ -67,13 +75,10 @@ export function buildSavedPrintersHtml(
           <input type="text" data-field="name" value="${escapeHtml(nameValue)}" placeholder="${escapeHtml(p.model || p.address)}" />
         </div>
         <div class="row">
-          <label>Address</label>
-          <input type="text" data-field="address" value="${escapeHtml(p.address)}" />
+          <label>${usb ? "Device" : "Address"}</label>
+          <input type="text" data-field="address" value="${escapeHtml(p.address)}" ${usb ? "readonly" : ""} />
         </div>
-        <div class="row">
-          <label>Print port</label>
-          <input type="number" data-field="printPort" min="1" max="65535" value="${escapeHtml(p.printPort)}" />
-        </div>
+        ${portRow}
         <div class="button-row">
           <button type="button" data-action="save">Save changes</button>
           ${isDefault ? "" : `<button type="button" class="primary" data-action="default">Set as default</button>`}
