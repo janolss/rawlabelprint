@@ -8,8 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "typecheck": "tsc -p ui --noEmit",
+    "lint:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "lint": "npm run lint:rust && npm run typecheck",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml && npm run test:ui",
-    "test:ui": "node --import tsx --test ui/print-log-view.test.ts"
+    "test:ui": "node --import tsx --test ui/*.test.ts"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn parse_null_terminated_empty_or_short_buffer() {
         assert_eq!(parse_null_terminated(&[], 0), "");
-        assert_eq!(parse_null_terminated(&[b'A', b'B'], 5), "");
+        assert_eq!(parse_null_terminated(b"AB", 5), "");
         assert_eq!(parse_null_terminated(b"ABC", 0), "ABC");
         assert_eq!(parse_null_terminated(b"  hi  \0xx", 0), "hi");
     }

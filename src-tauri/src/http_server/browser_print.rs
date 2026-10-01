@@ -2,7 +2,9 @@ use crate::http_server::fetch::fetch_url_bytes;
 use crate::http_server::multipart::{
     multipart_boundary, parse_multipart_parts, parse_write_request,
 };
-use crate::http_server::resolve::{collect_known_printers, resolve_by_device_ref, BrowserDeviceRef};
+use crate::http_server::resolve::{
+    collect_known_printers, resolve_by_device_ref, BrowserDeviceRef,
+};
 use crate::http_server::response::{empty_ok, json_err, json_ok, text_ok};
 use crate::http_server::HttpSharedState;
 use axum::body::Bytes;
@@ -45,6 +47,7 @@ async fn compatible_enabled(state: &HttpSharedState) -> bool {
     state.config.read().await.browser_print_compatible
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_compatible(state: &HttpSharedState) -> Result<(), Response> {
     if compatible_enabled(state).await {
         Ok(())
@@ -495,7 +498,8 @@ mod tests {
         let state = state_with_printer(lan_printer("127.0.0.1", addr.port()), true).await;
         let zpl = "^XA^FDWriteLog^FS^XZ";
         let body = format!(r#"{{"device":{{"uid":"SERIAL1"}},"data":"{zpl}"}}"#);
-        let response = handle_write(State(state.clone()), HeaderMap::new(), Bytes::from(body)).await;
+        let response =
+            handle_write(State(state.clone()), HeaderMap::new(), Bytes::from(body)).await;
         let (parts, _) = response.into_response().into_parts();
         assert_eq!(parts.status, StatusCode::OK);
 

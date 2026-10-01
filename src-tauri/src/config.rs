@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +117,11 @@ fn default_listen_address() -> String {
     "127.0.0.1".into()
 }
 
+/// HTTP bind address is always loopback. Non-loopback values in config/UI are ignored.
+pub fn sanitize_listen_address(_requested: &str) -> String {
+    default_listen_address()
+}
+
 fn default_http_port() -> u16 {
     9100
 }
@@ -153,16 +158,14 @@ impl AppConfig {
 
     /// Insert or replace by address. Optionally mark as default.
     pub fn upsert_printer(&mut self, printer: PrinterInfo, make_default: bool) {
-        self.added_printers
-            .retain(|p| p.address != printer.address);
-        if make_default {
-            self.default_printer = Some(printer.clone());
-        } else if self
-            .default_printer
-            .as_ref()
-            .map(|d| d.address == printer.address)
-            .unwrap_or(false)
-        {
+        self.added_printers.retain(|p| p.address != printer.address);
+        let refresh_default = make_default
+            || self
+                .default_printer
+                .as_ref()
+                .map(|d| d.address == printer.address)
+                .unwrap_or(false);
+        if refresh_default {
             self.default_printer = Some(printer.clone());
         }
         self.added_printers.push(printer);
@@ -192,9 +195,7 @@ impl AppConfig {
         if address.is_empty() {
             return Err("Address is required".into());
         }
-        if address != original_address
-            && self.added_printers.iter().any(|p| p.address == address)
-        {
+        if address != original_address && self.added_printers.iter().any(|p| p.address == address) {
             return Err(format!("A printer with address {address} already exists"));
         }
 
@@ -221,24 +222,27 @@ impl AppConfig {
     }
 }
 
-pub fn config_path(app_data_dir: &PathBuf) -> PathBuf {
+pub fn config_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("config.json")
 }
 
-pub fn load_config(app_data_dir: &PathBuf) -> AppConfig {
+pub fn load_config(app_data_dir: &Path) -> AppConfig {
     let path = config_path(app_data_dir);
     let mut config = match fs::read_to_string(&path) {
         Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
         Err(_) => AppConfig::default(),
     };
+    config.listen_address = sanitize_listen_address(&config.listen_address);
     config.normalize_saved_printers();
     config
 }
 
-pub fn save_config(app_data_dir: &PathBuf, config: &AppConfig) -> Result<(), String> {
+pub fn save_config(app_data_dir: &Path, config: &AppConfig) -> Result<(), String> {
     fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
     let path = config_path(app_data_dir);
-    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    let mut to_save = config.clone();
+    to_save.listen_address = sanitize_listen_address(&to_save.listen_address);
+    let json = serde_json::to_string_pretty(&to_save).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
@@ -381,8 +385,10 @@ mod tests {
 
     #[test]
     fn normalize_saved_printers_ensures_default_in_list() {
-        let mut cfg = AppConfig::default();
-        cfg.default_printer = Some(sample_printer("10.0.0.9", "SN9"));
+        let mut cfg = AppConfig {
+            default_printer: Some(sample_printer("10.0.0.9", "SN9")),
+            ..Default::default()
+        };
         cfg.normalize_saved_printers();
         assert_eq!(cfg.added_printers.len(), 1);
         assert_eq!(cfg.added_printers[0].address, "10.0.0.9");
@@ -390,9 +396,11 @@ mod tests {
 
     #[test]
     fn config_serde_roundtrip() {
-        let mut cfg = AppConfig::default();
-        cfg.browser_print_compatible = false;
-        cfg.launch_at_login = true;
+        let mut cfg = AppConfig {
+            browser_print_compatible: false,
+            launch_at_login: true,
+            ..Default::default()
+        };
         cfg.upsert_printer(sample_printer("10.0.0.1", "S1"), true);
         let json = serde_json::to_string(&cfg).unwrap();
         let back: AppConfig = serde_json::from_str(&json).unwrap();
@@ -406,8 +414,10 @@ mod tests {
     fn load_save_config_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
-        let mut cfg = AppConfig::default();
-        cfg.browser_print_compatible = false;
+        let mut cfg = AppConfig {
+            browser_print_compatible: false,
+            ..Default::default()
+        };
         cfg.upsert_printer(sample_printer("10.0.0.1", "S1"), true);
         save_config(&path, &cfg).unwrap();
 
@@ -420,7 +430,7 @@ mod tests {
     #[test]
     fn load_config_missing_file_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let loaded = load_config(&dir.path().to_path_buf());
+        let loaded = load_config(dir.path());
         assert_eq!(loaded.port, 9100);
         assert!(loaded.browser_print_compatible);
         assert!(loaded.added_printers.is_empty());
@@ -457,5 +467,42 @@ mod tests {
         let loaded = load_config(&path);
         assert_eq!(loaded.added_printers.len(), 1);
         assert_eq!(loaded.added_printers[0].address, "10.0.0.7");
+    }
+
+    #[test]
+    fn sanitize_listen_address_always_loopback() {
+        assert_eq!(sanitize_listen_address("0.0.0.0"), "127.0.0.1");
+        assert_eq!(sanitize_listen_address("192.168.1.1"), "127.0.0.1");
+        assert_eq!(sanitize_listen_address("127.0.0.1"), "127.0.0.1");
+        assert_eq!(sanitize_listen_address(""), "127.0.0.1");
+    }
+
+    #[test]
+    fn load_config_forces_loopback_even_if_file_says_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let json = r#"{
+            "listenAddress": "0.0.0.0",
+            "port": 9100,
+            "addedPrinters": [],
+            "browserPrintCompatible": true
+        }"#;
+        fs::write(config_path(&path), json).unwrap();
+        let loaded = load_config(&path);
+        assert_eq!(loaded.listen_address, "127.0.0.1");
+    }
+
+    #[test]
+    fn save_config_writes_loopback_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let cfg = AppConfig {
+            listen_address: "0.0.0.0".into(),
+            ..Default::default()
+        };
+        save_config(&path, &cfg).unwrap();
+        let raw = fs::read_to_string(config_path(&path)).unwrap();
+        assert!(raw.contains("127.0.0.1"));
+        assert!(!raw.contains("0.0.0.0"));
     }
 }

@@ -33,9 +33,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.98.1"
+          components: rustfmt, clippy
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+
+      - name: Lint
+        run: npm run lint
 
       - run: npm test

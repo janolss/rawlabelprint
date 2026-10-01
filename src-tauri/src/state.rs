@@ -149,7 +149,10 @@ impl AppState {
 
         let (listen, port) = {
             let cfg = self.config.read().await;
-            (cfg.listen_address.clone(), cfg.port)
+            (
+                crate::config::sanitize_listen_address(&cfg.listen_address),
+                cfg.port,
+            )
         };
 
         match start_http_server(&listen, port, self.http_shared()).await {
@@ -187,28 +190,21 @@ mod tests {
 
     #[tokio::test]
     async fn resend_print_log_sends_payload_and_records_entry() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let accept = tokio::spawn(accept_one_payload(listener));
 
-        let mut cfg = AppConfig::default();
-        cfg.debug_logging = true;
-        cfg.default_printer = Some(sample_printer("127.0.0.1", addr.port()));
+        let mut cfg = AppConfig {
+            debug_logging: true,
+            default_printer: Some(sample_printer("127.0.0.1", addr.port())),
+            ..Default::default()
+        };
         cfg.normalize_saved_printers();
 
         let state = AppState::new(std::env::temp_dir().join("rawlabelprint-resend-test"), cfg);
         let zpl = b"^XA^FDResendMe^FS^XZ";
         state
-            .record_print_log(
-                "/",
-                "TestPrinter",
-                "127.0.0.1",
-                addr.port(),
-                zpl,
-                Ok(()),
-            )
+            .record_print_log("/", "TestPrinter", "127.0.0.1", addr.port(), zpl, Ok(()))
             .await;
 
         let id = state.print_log.list()[0].id;
@@ -236,8 +232,10 @@ mod tests {
 
     #[tokio::test]
     async fn record_print_log_respects_debug_flag() {
-        let mut cfg = AppConfig::default();
-        cfg.debug_logging = false;
+        let cfg = AppConfig {
+            debug_logging: false,
+            ..Default::default()
+        };
         let state = AppState::new(std::env::temp_dir().join("rawlabelprint-debug-off"), cfg);
         state
             .record_print_log("/", "A", "10.0.0.1", 9100, b"^XA^XZ", Ok(()))

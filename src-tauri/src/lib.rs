@@ -7,7 +7,7 @@ mod print;
 mod print_log;
 mod state;
 
-use config::{load_config, AppConfig, PrinterInfo};
+use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo};
 use discovery::search_zebra_printers;
 use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogEntry;
@@ -40,6 +40,7 @@ async fn save_settings(
 ) -> Result<AppConfig, String> {
     {
         let mut cfg = state.config.write().await;
+        let listen_address = sanitize_listen_address(&listen_address);
         let restart_needed = cfg.listen_address != listen_address || cfg.port != port;
         cfg.listen_address = listen_address;
         cfg.port = port;
@@ -161,9 +162,9 @@ async fn remove_added_printer(
 
 #[tauri::command]
 async fn check_printer_status(printer: PrinterInfo) -> Result<PrinterStatus, String> {
-    Ok(tauri::async_runtime::spawn_blocking(move || get_printer_status(&printer))
+    tauri::async_runtime::spawn_blocking(move || get_printer_status(&printer))
         .await
-        .map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -219,10 +220,7 @@ async fn clear_print_log(state: tauri::State<'_, Arc<AppState>>) -> Result<(), S
 }
 
 #[tauri::command]
-async fn resend_print_log(
-    state: tauri::State<'_, Arc<AppState>>,
-    id: u64,
-) -> Result<(), String> {
+async fn resend_print_log(state: tauri::State<'_, Arc<AppState>>, id: u64) -> Result<(), String> {
     state.resend_print_log(id).await
 }
 
@@ -237,8 +235,7 @@ fn show_settings(app: &AppHandle) {
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

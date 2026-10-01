@@ -52,7 +52,11 @@ impl DeviceSessionPool {
         Self::purge_idle(&mut map);
 
         if let Some(session) = map.get_mut(uid) {
-            match session.stream.write_all(data).and_then(|_| session.stream.flush()) {
+            match session
+                .stream
+                .write_all(data)
+                .and_then(|_| session.stream.flush())
+            {
                 Ok(()) => {
                     session.last_used = Instant::now();
                     return Ok(());
@@ -94,7 +98,9 @@ impl DeviceSessionPool {
             );
         }
 
-        let session = map.get_mut(uid).ok_or_else(|| "Session missing".to_string())?;
+        let session = map
+            .get_mut(uid)
+            .ok_or_else(|| "Session missing".to_string())?;
         let _ = session.stream.set_read_timeout(Some(READ_TIMEOUT));
         let mut buf = Vec::new();
         let mut chunk = [0u8; 4096];
@@ -227,10 +233,7 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
             status
         }
         Err(e) => {
-            let print_err = format!(
-                "TCP {}:{} — {e}",
-                printer.address, printer.print_port
-            );
+            let print_err = format!("TCP {}:{} — {e}", printer.address, printer.print_port);
             // Web UI is usually on config_port (80). Reachable HTTP helps diagnose Local Network vs RAW port.
             let config_addr: Result<SocketAddr, _> =
                 format!("{}:{}", printer.address, config_port).parse();
@@ -304,14 +307,16 @@ mod tests {
 
     #[test]
     fn decode_hqes_nonzero_error_flag() {
-        let (errors, warnings) = decode_hqes("ERRORS:         00000001\nWARNINGS:       00000000\n");
+        let (errors, warnings) =
+            decode_hqes("ERRORS:         00000001\nWARNINGS:       00000000\n");
         assert_eq!(errors.len(), 1);
         assert!(warnings.is_empty());
     }
 
     #[test]
     fn decode_hqes_clean() {
-        let (errors, warnings) = decode_hqes("ERRORS:         00000000\nWARNINGS:       00000000\n");
+        let (errors, warnings) =
+            decode_hqes("ERRORS:         00000000\nWARNINGS:       00000000\n");
         assert!(errors.is_empty());
         assert!(warnings.is_empty());
     }

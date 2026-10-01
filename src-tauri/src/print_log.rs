@@ -7,6 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_CAPACITY: usize = 50;
 const DEFAULT_MAX_PREVIEW_BYTES: usize = 20 * 1024;
+/// Max bytes kept per entry for resend (aligned with HTTP body limit).
+const DEFAULT_MAX_STORED_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,7 +25,7 @@ pub struct PrintLogEntry {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Full payload kept for resend; omitted from UI JSON.
+    /// Payload kept for resend (may be truncated to max_stored_bytes); omitted from UI JSON.
     #[serde(skip)]
     pub data: Vec<u8>,
 }
@@ -37,6 +39,7 @@ struct PrintLogInner {
     next_id: u64,
     capacity: usize,
     max_preview_bytes: usize,
+    max_stored_bytes: usize,
 }
 
 impl PrintLog {
@@ -47,6 +50,7 @@ impl PrintLog {
                 next_id: 1,
                 capacity: DEFAULT_CAPACITY,
                 max_preview_bytes: DEFAULT_MAX_PREVIEW_BYTES,
+                max_stored_bytes: DEFAULT_MAX_STORED_BYTES,
             }),
         }
     }
@@ -63,7 +67,8 @@ impl PrintLog {
         let Ok(mut guard) = self.inner.lock() else {
             return;
         };
-        let (data_preview, truncated) = preview_bytes(data, guard.max_preview_bytes);
+        let (data_preview, preview_truncated) = preview_bytes(data, guard.max_preview_bytes);
+        let (stored, stored_truncated) = truncate_stored(data, guard.max_stored_bytes);
         let (ok, error) = match result {
             Ok(()) => (true, None),
             Err(e) => (false, Some(e)),
@@ -77,10 +82,10 @@ impl PrintLog {
             print_port: if print_port == 0 { 9100 } else { print_port },
             data_preview,
             data_bytes: data.len(),
-            truncated,
+            truncated: preview_truncated || stored_truncated,
             ok,
             error,
-            data: data.to_vec(),
+            data: stored,
         };
         guard.next_id = guard.next_id.saturating_add(1);
         if guard.entries.len() >= guard.capacity {
@@ -134,6 +139,14 @@ fn preview_bytes(data: &[u8], max_bytes: usize) -> (String, bool) {
     (preview, truncated)
 }
 
+fn truncate_stored(data: &[u8], max_bytes: usize) -> (Vec<u8>, bool) {
+    if data.len() > max_bytes {
+        (data[..max_bytes].to_vec(), true)
+    } else {
+        (data.to_vec(), false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +185,21 @@ mod tests {
     }
 
     #[test]
+    fn truncates_stored_payload_to_max() {
+        let log = PrintLog::new();
+        {
+            let mut guard = log.inner.lock().unwrap();
+            guard.max_stored_bytes = 4;
+            guard.max_preview_bytes = 100;
+        }
+        log.record("/", "A", "1.1.1.1", 9100, b"0123456789", Ok(()));
+        let e = &log.list()[0];
+        assert_eq!(e.data_bytes, 10);
+        assert_eq!(e.data, b"0123");
+        assert!(e.truncated);
+    }
+
+    #[test]
     fn records_errors() {
         let log = PrintLog::new();
         log.record(
@@ -199,7 +227,8 @@ mod tests {
     }
 
     #[test]
-    fn default_preview_limit_is_20kb() {
+    fn default_limits() {
         assert_eq!(DEFAULT_MAX_PREVIEW_BYTES, 20 * 1024);
+        assert_eq!(DEFAULT_MAX_STORED_BYTES, 1024 * 1024);
     }
 }

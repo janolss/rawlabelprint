@@ -42,8 +42,10 @@ pub(crate) fn test_state(
     default: Option<PrinterInfo>,
     discovered: Vec<PrinterInfo>,
 ) -> HttpSharedState {
-    let mut config = AppConfig::default();
-    config.browser_print_compatible = compatible;
+    let mut config = AppConfig {
+        browser_print_compatible: compatible,
+        ..Default::default()
+    };
     if let Some(p) = default {
         config.upsert_printer(p, true);
     }
@@ -59,9 +61,11 @@ pub(crate) async fn state_with_printer(
     printer: PrinterInfo,
     debug_logging: bool,
 ) -> HttpSharedState {
-    let mut config = AppConfig::default();
-    config.debug_logging = debug_logging;
-    config.browser_print_compatible = true;
+    let mut config = AppConfig {
+        debug_logging,
+        browser_print_compatible: true,
+        ..Default::default()
+    };
     config.upsert_printer(printer, true);
     HttpSharedState {
         config: Arc::new(RwLock::new(config)),

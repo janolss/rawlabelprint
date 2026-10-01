@@ -21,12 +21,8 @@ pub(crate) async fn fetch_url_bytes(url: &str) -> Result<Vec<u8>, String> {
         };
         let addr = format!("{host}:{port}");
         let mut stream = TcpStream::connect(addr).map_err(|e| e.to_string())?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .ok();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
         let req = format!("GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
         use std::io::Write;
         stream
@@ -45,7 +41,5 @@ pub(crate) async fn fetch_url_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 pub(crate) fn find_header_end(buf: &[u8]) -> Option<usize> {
-    buf.windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|i| i + 4)
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
 }

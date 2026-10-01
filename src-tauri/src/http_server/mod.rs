@@ -11,6 +11,7 @@ pub(crate) mod test_util;
 use crate::config::{AppConfig, PrinterInfo};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
+use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
 use axum::routing::{any, get, post};
 use axum::Router;
@@ -24,6 +25,9 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
+
+/// Max HTTP request body size (simple API, /write, /convert, …).
+pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct HttpSharedState {
@@ -88,6 +92,7 @@ pub(crate) fn build_app_router(state: HttpSharedState) -> Router {
         .route("/convert", post(handle_convert))
         .route("/convert/scan", post(handle_convert_scan))
         .with_state(state)
+        .layer(DefaultBodyLimit::max(MAX_HTTP_BODY_BYTES))
         .layer(cors)
 }
 
@@ -96,6 +101,7 @@ pub async fn start_http_server(
     port: u16,
     state: HttpSharedState,
 ) -> Result<HttpServerHandle, String> {
+    let listen_address = crate::config::sanitize_listen_address(listen_address);
     let addr: SocketAddr = format!("{listen_address}:{port}")
         .parse()
         .map_err(|e| format!("Invalid listen address: {e}"))?;
