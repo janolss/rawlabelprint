@@ -69,6 +69,16 @@ Device `uid` is the printer serial when known, otherwise `net:<ip>:<printPort>` 
 
 Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send` / `device.sendFile`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on Apple Silicon or Linux machines and official Browser Print elsewhere.
 
+### Drop-in JS client
+
+This repo includes a TypeScript **drop-in** for Zebra `BrowserPrint-3.1.250` under [`browserprint-client/`](browserprint-client/) (same global `BrowserPrint` API, `fetch` + timeouts). Build with `npm run build:browserprint`, then:
+
+```html
+<script src="browserprint-client/dist/BrowserPrint.min.js"></script>
+```
+
+Interactive check: open [`test/browserprint.html`](test/browserprint.html) with RawLabelPrint running (Compatible mode on). Prefer this client for new pages; Zebra’s minified SDK remains optional for third-party apps.
+
 Disable Compatible mode in Settings if you only want the simple `/` API.
 
 ## Configure (Settings)
@@ -210,7 +220,8 @@ sudo apt install ./src-tauri/target/release/bundle/deb/RawLabelPrint_*.deb
 | `ui/` | Settings UI (Vite + vanilla JS) |
 | `src-tauri/` | Rust: tray, HTTP API, UDP/USB discovery, TCP/USB print |
 | `src-tauri/udev/` | Linux udev rule for Zebra USB (packaged in `.deb`) |
-| `test/` | Browser API smoke-test page |
+| `browserprint-client/` | Drop-in BrowserPrint-3.1.250-compatible JS client |
+| `test/` | Browser API smoke-test pages |
 | `reference/` | Reference implementations (local only, gitignored) |
 
 ## Notes

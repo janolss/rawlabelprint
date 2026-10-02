@@ -8,11 +8,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "typecheck": "tsc -p ui --noEmit",
+    "typecheck": "tsc -p ui --noEmit && npm run typecheck:browserprint",
+    "typecheck:browserprint": "npm run typecheck --prefix browserprint-client",
+    "build:browserprint": "npm run build --prefix browserprint-client",
     "lint:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "lint": "npm run lint:rust && npm run typecheck",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml && npm run test:ui",
-    "test:ui": "node --import tsx --test ui/*.test.ts"
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml && npm run test:ui && npm run test:browserprint",
+    "test:ui": "node --import tsx --test ui/*.test.ts",
+    "test:browserprint": "npm test --prefix browserprint-client"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

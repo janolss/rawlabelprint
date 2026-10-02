@@ -1,0 +1,31 @@
+{
+  "name": "@rawlabelprint/browserprint-client",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Drop-in BrowserPrint-3.1.250-compatible client for RawLabelPrint",
+  "main": "./dist/browserprint.js",
+  "module": "./dist/browserprint.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/browserprint.js"
+    }
+  },
+  "unpkg": "./dist/BrowserPrint.min.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --import tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8"
+  }
+}
