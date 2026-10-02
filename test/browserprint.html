@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BrowserPrint drop-in test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    button, textarea, select { width: 100%; margin: 0.35rem 0 0.8rem; padding: 0.5rem; font: inherit; }
+    button { cursor: pointer; }
+    .error { color: #b3261e; }
+    pre { background: #f4f4f5; padding: 0.75rem; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>BrowserPrint drop-in test</h1>
+  <p>
+    Loads <code>browserprint-client/dist/BrowserPrint.min.js</code> and talks to
+    RawLabelPrint Compatible mode at <code>http://127.0.0.1:9100</code>.
+  </p>
+  <ol>
+    <li>
+      <button type="button" id="discover">getLocalDevices / getDefaultDevice</button>
+    </li>
+    <li>
+      Device
+      <select id="devices"></select>
+    </li>
+    <li>
+      RAW data
+      <textarea id="data" rows="6">^XA^FO50,50^A0N,40,40^FDHello from BrowserPrint drop-in^FS^XZ</textarea>
+      <button type="button" id="send">device.send</button>
+    </li>
+  </ol>
+  <p id="status"></p>
+  <pre id="result"></pre>
+
+  <script src="../browserprint-client/dist/BrowserPrint.min.js"></script>
+  <script>
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const selectEl = document.getElementById("devices");
+    /** @type {any[]} */
+    let devices = [];
+
+    function show(label, value) {
+      statusEl.textContent = label;
+      statusEl.className = label.toLowerCase().includes("error") ? "error" : "";
+      resultEl.textContent =
+        typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    function deviceSummary(d) {
+      return {
+        name: d.name,
+        uid: d.uid,
+        connection: d.connection,
+        deviceType: d.deviceType,
+      };
+    }
+
+    function refreshSelect(list) {
+      devices = list || [];
+      selectEl.innerHTML = devices
+        .map(
+          (d, i) =>
+            `<option value="${i}">${d.name || d.uid || "device " + i}</option>`
+        )
+        .join("");
+    }
+
+    document.getElementById("discover").addEventListener("click", () => {
+      if (typeof BrowserPrint === "undefined") {
+        show("Error", "BrowserPrint global missing — build browserprint-client first.");
+        return;
+      }
+
+      BrowserPrint.getApplicationConfiguration(
+        (cfg) => {
+          BrowserPrint.getDefaultDevice(
+            "printer",
+            (defaultDevice) => {
+              BrowserPrint.getLocalDevices(
+                (map) => {
+                  const printers = (map && map.printer) || [];
+                  refreshSelect(printers);
+                  show("OK", {
+                    config: cfg,
+                    defaultDevice: defaultDevice
+                      ? deviceSummary(defaultDevice)
+                      : null,
+                    printers: printers.map(deviceSummary),
+                  });
+                },
+                (err) => show("Error getLocalDevices", err)
+              );
+            },
+            (err) => show("Error getDefaultDevice", err)
+          );
+        },
+        (err) => show("Error getApplicationConfiguration", err)
+      );
+    });
+
+    document.getElementById("send").addEventListener("click", () => {
+      const device = devices[Number(selectEl.value)];
+      if (!device) {
+        show("Error", "No device selected. Run discovery first.");
+        return;
+      }
+      const data = document.getElementById("data").value;
+      device.send(
+        data,
+        (res) => show("Sent", res || "ok"),
+        (err) => show("Error send", err)
+      );
+    });
+
+    if (typeof BrowserPrint === "undefined") {
+      show(
+        "Error",
+        "BrowserPrint global missing. Run: npm run build:browserprint"
+      );
+    } else {
+      show("Ready", "Click discovery to query the local agent.");
+    }
+  </script>
+</body>
+</html>
