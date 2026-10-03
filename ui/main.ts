@@ -452,6 +452,7 @@ els.originAllowedList.addEventListener("click", (e) => {
 });
 
 void listen("origin-pending", () => {
+  document.querySelector<HTMLButtonElement>('[data-tab="general"]')?.click();
   refreshOriginPermissions().catch((e) => console.error(e));
 });
 
