@@ -30,6 +30,23 @@ pub struct PrintLogEntry {
     pub data: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintLogSummary {
+    pub id: u64,
+    pub timestamp_ms: u64,
+    pub route: String,
+    pub printer_name: String,
+    pub printer_address: String,
+    pub print_port: u16,
+    pub data_preview: String,
+    pub data_bytes: usize,
+    pub truncated: bool,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 pub struct PrintLog {
     inner: Mutex<PrintLogInner>,
 }
@@ -94,12 +111,37 @@ impl PrintLog {
         guard.entries.push_back(entry);
     }
 
+    #[cfg(test)]
     pub fn list(&self) -> Vec<PrintLogEntry> {
         let Ok(guard) = self.inner.lock() else {
             return Vec::new();
         };
         // Newest first for the UI.
         guard.entries.iter().rev().cloned().collect()
+    }
+
+    pub fn list_summaries(&self) -> Vec<PrintLogSummary> {
+        let Ok(guard) = self.inner.lock() else {
+            return Vec::new();
+        };
+        guard
+            .entries
+            .iter()
+            .rev()
+            .map(|entry| PrintLogSummary {
+                id: entry.id,
+                timestamp_ms: entry.timestamp_ms,
+                route: entry.route.clone(),
+                printer_name: entry.printer_name.clone(),
+                printer_address: entry.printer_address.clone(),
+                print_port: entry.print_port,
+                data_preview: entry.data_preview.clone(),
+                data_bytes: entry.data_bytes,
+                truncated: entry.truncated,
+                ok: entry.ok,
+                error: entry.error.clone(),
+            })
+            .collect()
     }
 
     pub fn get(&self, id: u64) -> Option<PrintLogEntry> {
@@ -214,6 +256,20 @@ mod tests {
         assert!(!e.ok);
         assert_eq!(e.error.as_deref(), Some("Could not connect"));
         assert_eq!(e.route, "/write");
+    }
+
+    #[test]
+    fn list_summaries_omit_payload_but_get_keeps_it() {
+        let log = PrintLog::new();
+        let payload = b"^XA^FDHi^FS^XZ";
+        log.record("/", "A", "10.0.0.1", 9100, payload, Ok(()));
+        let id = log.list_summaries()[0].id;
+
+        let summary = log.list_summaries().remove(0);
+        let json = serde_json::to_value(summary).unwrap();
+        assert!(json.get("data").is_none());
+        assert_eq!(json["dataBytes"], payload.len());
+        assert_eq!(log.get(id).unwrap().data, payload);
     }
 
     #[test]

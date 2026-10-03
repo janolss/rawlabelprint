@@ -1,8 +1,7 @@
 use crate::config::{save_config, AppConfig, PrinterInfo};
-use crate::http_server::{start_http_server, HttpServerHandle, HttpSharedState};
+use crate::http_server::{start_http_server, HttpServerHandle, HttpSharedState, PendingOrigins};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex, RwLock};
@@ -13,7 +12,7 @@ pub struct AppState {
     pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
     pub sessions: Arc<DeviceSessionPool>,
     pub print_log: Arc<PrintLog>,
-    pub pending_origins: Arc<RwLock<BTreeSet<String>>>,
+    pub pending_origins: Arc<RwLock<PendingOrigins>>,
     pub pending_tx: broadcast::Sender<String>,
     pub http: Mutex<Option<HttpServerHandle>>,
     pub http_status: Mutex<String>,
@@ -28,7 +27,7 @@ impl AppState {
             discovered: Arc::new(RwLock::new(Vec::new())),
             sessions: Arc::new(DeviceSessionPool::new()),
             print_log: Arc::new(PrintLog::new()),
-            pending_origins: Arc::new(RwLock::new(BTreeSet::new())),
+            pending_origins: Arc::new(RwLock::new(PendingOrigins::new())),
             pending_tx,
             http: Mutex::new(None),
             http_status: Mutex::new("stopped".into()),

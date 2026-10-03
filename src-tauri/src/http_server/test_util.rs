@@ -57,7 +57,7 @@ pub(crate) fn test_state(
         discovered: Arc::new(RwLock::new(discovered)),
         sessions: Arc::new(DeviceSessionPool::new()),
         print_log: Arc::new(PrintLog::new()),
-        pending_origins: Arc::new(RwLock::new(std::collections::BTreeSet::new())),
+        pending_origins: Arc::new(RwLock::new(crate::http_server::PendingOrigins::new())),
         pending_tx,
     }
 }
@@ -78,7 +78,7 @@ pub(crate) async fn state_with_printer(
         discovered: Arc::new(RwLock::new(Vec::new())),
         sessions: Arc::new(DeviceSessionPool::new()),
         print_log: Arc::new(PrintLog::new()),
-        pending_origins: Arc::new(RwLock::new(std::collections::BTreeSet::new())),
+        pending_origins: Arc::new(RwLock::new(crate::http_server::PendingOrigins::new())),
         pending_tx,
     }
 }

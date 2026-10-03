@@ -229,6 +229,6 @@ mod tests {
             .pending_origins
             .read()
             .await
-            .contains("https://evil.test"));
+            .contains_key("https://evil.test"));
     }
 }

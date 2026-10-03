@@ -46,7 +46,10 @@ export function createBrowserPrint(
   baseUrl: string = resolveBaseUrl()
 ): BrowserPrintAPI {
   const api = {} as BrowserPrintAPI;
-  const readIntervals = new Map<string, ReturnType<typeof setTimeout>>();
+  const readIntervals = new Map<
+    string,
+    { stopped: boolean; timer?: ReturnType<typeof setTimeout> }
+  >();
 
   api.defaultSuccessCallback = () => {};
   api.defaultErrorCallback = () => {};
@@ -145,27 +148,39 @@ export function createBrowserPrint(
       delay = 1;
     }
     const key = intervalKey(device);
+    api.stopReadOnInterval(device);
+    const interval = { stopped: false } as {
+      stopped: boolean;
+      timer?: ReturnType<typeof setTimeout>;
+    };
 
     const tick = (): void => {
+      if (interval.stopped) return;
       device.read(
         (data) => {
+          if (interval.stopped || readIntervals.get(key) !== interval) return;
           invokeSuccess(finished, data);
-          readIntervals.set(key, setTimeout(tick, delay));
+          interval.timer = setTimeout(tick, delay);
         },
         () => {
-          readIntervals.set(key, setTimeout(tick, delay));
+          if (interval.stopped || readIntervals.get(key) !== interval) return;
+          interval.timer = setTimeout(tick, delay);
         }
       );
     };
 
-    readIntervals.set(key, setTimeout(tick, delay));
+    readIntervals.set(key, interval);
+    interval.timer = setTimeout(tick, delay);
   };
 
   api.stopReadOnInterval = (device: DeviceLike): void => {
     const key = intervalKey(device);
-    const handle = readIntervals.get(key);
-    if (handle !== undefined) {
-      clearTimeout(handle);
+    const interval = readIntervals.get(key);
+    if (interval !== undefined) {
+      interval.stopped = true;
+      if (interval.timer !== undefined) {
+        clearTimeout(interval.timer);
+      }
       readIntervals.delete(key);
     }
   };

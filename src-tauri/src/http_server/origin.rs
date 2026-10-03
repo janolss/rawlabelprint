@@ -5,8 +5,11 @@
 
 use crate::http_server::HttpSharedState;
 use axum::http::{HeaderMap, StatusCode};
+use std::time::{Duration, Instant};
 
 pub(crate) const DENIED_STATUS: StatusCode = StatusCode::FORBIDDEN;
+const MAX_PENDING_ORIGINS: usize = 128;
+const PENDING_ORIGIN_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Normalize Origin for storage/compare (trim + lowercase).
 pub fn normalize_origin(raw: &str) -> String {
@@ -47,7 +50,13 @@ pub async fn ensure_origin_allowed(
 
     let newly_pending = {
         let mut pending = state.pending_origins.write().await;
-        pending.insert(origin.clone())
+        prune_expired_pending(&mut pending, Instant::now());
+        if pending.contains_key(&origin) || pending.len() >= MAX_PENDING_ORIGINS {
+            false
+        } else {
+            pending.insert(origin.clone(), Instant::now());
+            true
+        }
     };
     if newly_pending {
         let _ = state.pending_tx.send(origin.clone());
@@ -57,12 +66,18 @@ pub async fn ensure_origin_allowed(
 }
 
 pub async fn list_pending(state: &HttpSharedState) -> Vec<String> {
-    state.pending_origins.read().await.iter().cloned().collect()
+    let mut pending = state.pending_origins.write().await;
+    prune_expired_pending(&mut pending, Instant::now());
+    pending.keys().cloned().collect()
+}
+
+fn prune_expired_pending(pending: &mut crate::http_server::PendingOrigins, now: Instant) {
+    pending.retain(|_, created| now.duration_since(*created) < PENDING_ORIGIN_TTL);
 }
 
 pub async fn dismiss_pending(state: &HttpSharedState, origin: &str) -> bool {
     let key = normalize_origin(origin);
-    state.pending_origins.write().await.remove(&key)
+    state.pending_origins.write().await.remove(&key).is_some()
 }
 
 /// Snapshot type used by Settings UI.
@@ -149,6 +164,46 @@ mod tests {
         let _ = ensure_origin_allowed(&state, &h).await;
         let _ = ensure_origin_allowed(&state, &h).await;
         assert_eq!(state.pending_origins.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pending_origin_limit_does_not_stop_denial() {
+        let state = test_state(true, None, vec![]);
+        for index in 0..MAX_PENDING_ORIGINS {
+            let origin = format!("https://{index}.test");
+            assert!(ensure_origin_allowed(&state, &headers_with_origin(&origin))
+                .await
+                .is_err());
+        }
+
+        let overflow = "https://overflow.test";
+        assert!(
+            ensure_origin_allowed(&state, &headers_with_origin(overflow))
+                .await
+                .is_err()
+        );
+        let pending = state.pending_origins.read().await;
+        assert_eq!(pending.len(), MAX_PENDING_ORIGINS);
+        assert!(!pending.contains_key(overflow));
+    }
+
+    #[test]
+    fn expired_pending_origins_are_pruned() {
+        let created = Instant::now();
+        let current = created + Duration::from_secs(30);
+        let mut pending = crate::http_server::PendingOrigins::new();
+        pending.insert("https://expired.test".into(), created);
+        pending.insert("https://current.test".into(), current);
+
+        prune_expired_pending(
+            &mut pending,
+            created + PENDING_ORIGIN_TTL + Duration::from_secs(1),
+        );
+
+        assert_eq!(
+            pending.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["https://current.test"]
+        );
     }
 
     #[test]

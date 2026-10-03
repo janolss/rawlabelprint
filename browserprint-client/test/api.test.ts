@@ -189,6 +189,32 @@ test("device.read posts to /read", async () => {
   assert.equal(calls[0].url, `${BASE}read`);
 });
 
+test("readOnInterval replaces prior timers and stop cancels pending reads", async () => {
+  const bp = createBrowserPrint(BASE);
+  const device = new bp.Device(sampleDevice);
+  let readCount = 0;
+  let completeRead: Parameters<typeof device.read>[0] | undefined;
+  let resolveReadStarted!: () => void;
+  const readStarted = new Promise<void>((resolve) => {
+    resolveReadStarted = resolve;
+  });
+
+  device.read = (finished) => {
+    readCount += 1;
+    completeRead = finished;
+    resolveReadStarted();
+  };
+
+  bp.readOnInterval(device, () => {}, 50);
+  bp.readOnInterval(device, () => {}, 1);
+  await readStarted;
+  bp.stopReadOnInterval(device);
+  completeRead?.("done");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(readCount, 1);
+});
+
 test("convert posts multipart to /convert", async () => {
   const bp = createBrowserPrint(BASE);
   const calls = mockFetch(() =>

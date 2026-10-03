@@ -13,6 +13,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_millis(250);
 const SESSION_IDLE: Duration = Duration::from_secs(30);
+const MAX_DEVICE_SESSIONS: usize = 64;
 const USB_BAUD: u32 = 115_200;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -98,6 +99,31 @@ impl DeviceSessionPool {
         map.retain(|_, s| s.last_used.elapsed() < SESSION_IDLE);
     }
 
+    fn insert_session(map: &mut HashMap<String, DeviceSession>, uid: &str, stream: PrinterStream) {
+        if map.len() >= MAX_DEVICE_SESSIONS {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, session)| session.last_used)
+                .map(|(key, _)| key.clone())
+            {
+                map.remove(&oldest);
+            }
+        }
+        map.insert(
+            uid.to_string(),
+            DeviceSession {
+                stream,
+                last_used: Instant::now(),
+            },
+        );
+    }
+
+    pub fn purge_idle_sessions(&self) {
+        if let Ok(mut map) = self.inner.lock() {
+            Self::purge_idle(&mut map);
+        }
+    }
+
     pub fn write(&self, uid: &str, printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
         let mut map = self.inner.lock().map_err(|e| e.to_string())?;
         Self::purge_idle(&mut map);
@@ -123,13 +149,7 @@ impl DeviceSessionPool {
             .write_all(data)
             .map_err(|e| format!("Failed writing to printer: {e}"))?;
         let _ = stream.flush();
-        map.insert(
-            uid.to_string(),
-            DeviceSession {
-                stream,
-                last_used: Instant::now(),
-            },
-        );
+        Self::insert_session(&mut map, uid, stream);
         Ok(())
     }
 
@@ -140,13 +160,7 @@ impl DeviceSessionPool {
         if !map.contains_key(uid) {
             // Open a fresh connection so a lone /read still returns something (often empty).
             let stream = connect_printer(printer)?;
-            map.insert(
-                uid.to_string(),
-                DeviceSession {
-                    stream,
-                    last_used: Instant::now(),
-                },
-            );
+            Self::insert_session(&mut map, uid, stream);
         }
 
         let session = map
@@ -477,7 +491,7 @@ mod tests {
     use std::io::Read;
     use std::sync::{Arc, Mutex};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn decode_hqes_nonzero_error_flag() {
@@ -551,5 +565,81 @@ mod tests {
 
         handle.join().unwrap();
         assert_eq!(received.lock().unwrap().as_slice(), zpl);
+    }
+
+    #[test]
+    fn session_pool_purges_idle_sessions() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut byte = [0u8; 1];
+            stream.read_exact(&mut byte).unwrap();
+        });
+        let printer = PrinterInfo {
+            name: None,
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: "MOCK1".into(),
+            address: "127.0.0.1".into(),
+            port: 0,
+            print_port: port,
+            config_port: 80,
+            connection: CONNECTION_NETWORK.into(),
+        };
+        let pool = DeviceSessionPool::new();
+        pool.write("MOCK1", &printer, b"x").unwrap();
+        handle.join().unwrap();
+        pool.inner
+            .lock()
+            .unwrap()
+            .get_mut("MOCK1")
+            .unwrap()
+            .last_used = Instant::now() - SESSION_IDLE - Duration::from_secs(1);
+
+        pool.purge_idle_sessions();
+
+        assert!(pool.inner.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_pool_evicts_least_recently_used_at_capacity() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            for _ in 0..=MAX_DEVICE_SESSIONS {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut byte = [0u8; 1];
+                stream.read_exact(&mut byte).unwrap();
+            }
+        });
+        let printer = PrinterInfo {
+            name: None,
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: String::new(),
+            address: "127.0.0.1".into(),
+            port: 0,
+            print_port: port,
+            config_port: 80,
+            connection: CONNECTION_NETWORK.into(),
+        };
+        let pool = DeviceSessionPool::new();
+        for index in 0..MAX_DEVICE_SESSIONS {
+            pool.write(&format!("MOCK{index}"), &printer, b"x").unwrap();
+        }
+        pool.inner
+            .lock()
+            .unwrap()
+            .get_mut("MOCK0")
+            .unwrap()
+            .last_used = Instant::now() - Duration::from_secs(5);
+        pool.write("MOCK-new", &printer, b"x").unwrap();
+        handle.join().unwrap();
+
+        let sessions = pool.inner.lock().unwrap();
+        assert_eq!(sessions.len(), MAX_DEVICE_SESSIONS);
+        assert!(!sessions.contains_key("MOCK0"));
+        assert!(sessions.contains_key("MOCK-new"));
     }
 }

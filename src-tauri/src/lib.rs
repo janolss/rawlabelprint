@@ -11,7 +11,7 @@ mod usb_discovery;
 use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo, CONNECTION_NETWORK};
 use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
 use print::{get_printer_status, PrinterStatus};
-use print_log::PrintLogEntry;
+use print_log::PrintLogSummary;
 use state::AppState;
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -219,8 +219,8 @@ async fn test_print(
 #[tauri::command]
 async fn get_print_log(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<PrintLogEntry>, String> {
-    Ok(state.print_log.list())
+) -> Result<Vec<PrintLogSummary>, String> {
+    Ok(state.print_log.list_summaries())
 }
 
 #[tauri::command]
@@ -326,6 +326,18 @@ pub fn run() {
 
             let config = load_config(&app_data_dir);
             let state = Arc::new(AppState::new(app_data_dir, config.clone()));
+
+            let weak_state = Arc::downgrade(&state);
+            tauri::async_runtime::spawn(async move {
+                let mut cleanup = tokio::time::interval(std::time::Duration::from_secs(15));
+                loop {
+                    cleanup.tick().await;
+                    let Some(state) = weak_state.upgrade() else {
+                        break;
+                    };
+                    state.sessions.purge_idle_sessions();
+                }
+            });
 
             // Open Settings when a new website needs print approval.
             let mut pending_rx = state.subscribe_pending_origins();

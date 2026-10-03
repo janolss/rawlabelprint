@@ -62,7 +62,7 @@ function s(e, t, r) {
 	} catch {}
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/typeof.js
+//#region \0@oxc-project+runtime@0.151.0/helpers/esm/typeof.js
 function c(e) {
 	"@babel/helpers - typeof";
 	return c = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
@@ -72,7 +72,7 @@ function c(e) {
 	}, c(e);
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPrimitive.js
+//#region \0@oxc-project+runtime@0.151.0/helpers/esm/toPrimitive.js
 function l(e, t) {
 	if (c(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
@@ -84,13 +84,13 @@ function l(e, t) {
 	return (t === "string" ? String : Number)(e);
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPropertyKey.js
+//#region \0@oxc-project+runtime@0.151.0/helpers/esm/toPropertyKey.js
 function u(e) {
 	var t = l(e, "string");
 	return c(t) == "symbol" ? t : t + "";
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/defineProperty.js
+//#region \0@oxc-project+runtime@0.151.0/helpers/esm/defineProperty.js
 function d(e, t, n) {
 	return (t = u(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
@@ -245,20 +245,22 @@ function _(e = t()) {
 			}
 			o(t, a(e));
 		}).catch((e) => s(i, n.defaultErrorCallback, e));
-	}, n.readOnInterval = (e, t, n) => {
-		let r = n;
-		(r === void 0 || r === 0) && (r = 1);
-		let i = m(e), a = () => {
-			e.read((e) => {
-				o(t, e), c.set(i, setTimeout(a, r));
+	}, n.readOnInterval = (e, t, r) => {
+		let i = r;
+		(i === void 0 || i === 0) && (i = 1);
+		let a = m(e);
+		n.stopReadOnInterval(e);
+		let s = { stopped: !1 }, l = () => {
+			s.stopped || e.read((e) => {
+				s.stopped || c.get(a) !== s || (o(t, e), s.timer = setTimeout(l, i));
 			}, () => {
-				c.set(i, setTimeout(a, r));
+				s.stopped || c.get(a) !== s || (s.timer = setTimeout(l, i));
 			});
 		};
-		c.set(i, setTimeout(a, r));
+		c.set(a, s), s.timer = setTimeout(l, i);
 	}, n.stopReadOnInterval = (e) => {
 		let t = m(e), n = c.get(t);
-		n !== void 0 && (clearTimeout(n), c.delete(t));
+		n !== void 0 && (n.stopped = !0, n.timer !== void 0 && clearTimeout(n.timer), c.delete(t));
 	}, n.bindFieldToReadData = (e, t, r, i) => {
 		n.readOnInterval(e, (e) => {
 			e !== "" && (t.value = e, i?.());

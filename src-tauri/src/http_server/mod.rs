@@ -21,15 +21,17 @@ use browser_print::{
     handle_read, handle_write,
 };
 use simple::handle_root;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, oneshot, Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
 /// Max HTTP request body size (simple API, /write, /convert, …).
 pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
+pub type PendingOrigins = BTreeMap<String, Instant>;
 
 #[derive(Clone)]
 pub struct HttpSharedState {
@@ -37,7 +39,7 @@ pub struct HttpSharedState {
     pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
     pub sessions: Arc<DeviceSessionPool>,
     pub print_log: Arc<PrintLog>,
-    pub pending_origins: Arc<RwLock<BTreeSet<String>>>,
+    pub pending_origins: Arc<RwLock<PendingOrigins>>,
     /// Notifies UI when a new origin needs approval (may have no subscribers in tests).
     pub pending_tx: broadcast::Sender<String>,
 }
