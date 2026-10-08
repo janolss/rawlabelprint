@@ -1,6 +1,6 @@
 # RawLabelPrint
 
-macOS (Apple Silicon) and Linux (Pop!_OS / Ubuntu 24.04+) tray app that replaces [Zebra Browser Print](https://www.zebra.com/us/en/products/software/barcode-printers/link-os/browser-print.html) for browser-based raw label printing.
+macOS (Apple Silicon) and Linux (Pop!_OS / Ubuntu 24.04+) tray app for browser-based raw label printing.
 
 The app:
 
