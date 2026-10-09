@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_millis(250);
+/// Max wait for answers to status/info/config/SGD queries (Zebra client waits for ETX).
+const QUERY_READ_DEADLINE: Duration = Duration::from_secs(2);
+const ETX: u8 = 0x03;
 const SESSION_IDLE: Duration = Duration::from_secs(30);
 const MAX_DEVICE_SESSIONS: usize = 64;
 const USB_BAUD: u32 = 115_200;
@@ -82,6 +85,29 @@ impl PrinterStream {
 struct DeviceSession {
     stream: PrinterStream,
     last_used: Instant,
+    /// ETX-terminated frames the last write is expected to answer with (0 = unknown / idle read).
+    expected_etx: usize,
+    /// True when the last write was a query that expects a reply.
+    awaiting_reply: bool,
+}
+
+/// Classifies a write as a Zebra query and returns the number of ETX-terminated frames
+/// in the reply (`~HS` answers with 3 STX…ETX lines). `None` means plain print data.
+fn query_reply_frames(data: &[u8]) -> Option<usize> {
+    if data.len() > 1024 {
+        return None;
+    }
+    let text = String::from_utf8_lossy(data).to_ascii_lowercase();
+    let t = text.trim();
+    if t.starts_with("~hs") {
+        Some(3)
+    } else if t.starts_with("~hi") || t.contains("^hh") {
+        Some(1)
+    } else if t.contains("getvar") || t.starts_with("~hq") {
+        Some(0)
+    } else {
+        None
+    }
 }
 
 /// Open I/O sessions keyed by Browser Print device uid (write then read).
@@ -99,7 +125,12 @@ impl DeviceSessionPool {
         map.retain(|_, s| s.last_used.elapsed() < SESSION_IDLE);
     }
 
-    fn insert_session(map: &mut HashMap<String, DeviceSession>, uid: &str, stream: PrinterStream) {
+    fn insert_session(
+        map: &mut HashMap<String, DeviceSession>,
+        uid: &str,
+        stream: PrinterStream,
+        query: Option<usize>,
+    ) {
         if map.len() >= MAX_DEVICE_SESSIONS {
             if let Some(oldest) = map
                 .iter()
@@ -114,6 +145,8 @@ impl DeviceSessionPool {
             DeviceSession {
                 stream,
                 last_used: Instant::now(),
+                expected_etx: query.unwrap_or(0),
+                awaiting_reply: query.is_some(),
             },
         );
     }
@@ -128,7 +161,11 @@ impl DeviceSessionPool {
         let mut map = self.inner.lock().map_err(|e| e.to_string())?;
         Self::purge_idle(&mut map);
 
+        let query = query_reply_frames(data);
         if let Some(session) = map.get_mut(uid) {
+            if query.is_some() {
+                drain_pending(&mut session.stream);
+            }
             match session
                 .stream
                 .write_all(data)
@@ -136,6 +173,8 @@ impl DeviceSessionPool {
             {
                 Ok(()) => {
                     session.last_used = Instant::now();
+                    session.expected_etx = query.unwrap_or(0);
+                    session.awaiting_reply = query.is_some();
                     return Ok(());
                 }
                 Err(_) => {
@@ -149,47 +188,106 @@ impl DeviceSessionPool {
             .write_all(data)
             .map_err(|e| format!("Failed writing to printer: {e}"))?;
         let _ = stream.flush();
-        Self::insert_session(&mut map, uid, stream);
+        Self::insert_session(&mut map, uid, stream, query);
         Ok(())
     }
 
     pub fn read(&self, uid: &str, printer: &PrinterInfo) -> Result<String, String> {
-        let mut map = self.inner.lock().map_err(|e| e.to_string())?;
-        Self::purge_idle(&mut map);
+        // Take the session out so a slow reply does not block other printers.
+        let taken = {
+            let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+            Self::purge_idle(&mut map);
+            map.remove(uid)
+        };
+        let mut session = match taken {
+            Some(s) => s,
+            None => DeviceSession {
+                // Open a fresh connection so a lone /read still returns something (often empty).
+                stream: connect_printer(printer)?,
+                last_used: Instant::now(),
+                expected_etx: 0,
+                awaiting_reply: false,
+            },
+        };
 
-        if !map.contains_key(uid) {
-            // Open a fresh connection so a lone /read still returns something (often empty).
-            let stream = connect_printer(printer)?;
-            Self::insert_session(&mut map, uid, stream);
-        }
-
-        let session = map
-            .get_mut(uid)
-            .ok_or_else(|| "Session missing".to_string())?;
-        let _ = session.stream.set_read_timeout(Some(READ_TIMEOUT));
-        let mut buf = Vec::new();
-        let mut chunk = [0u8; 4096];
-        loop {
-            match session.stream.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => {
-                    buf.extend_from_slice(&chunk[..n]);
-                    if buf.len() > 65536 {
-                        break;
-                    }
-                }
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    break;
-                }
-                Err(_) => break,
-            }
-        }
+        let buf = if session.awaiting_reply {
+            read_query_reply(&mut session.stream, session.expected_etx)
+        } else {
+            read_idle(&mut session.stream)
+        };
+        session.awaiting_reply = false;
+        session.expected_etx = 0;
         session.last_used = Instant::now();
+
+        let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+        Self::insert_session(&mut map, uid, session.stream, None);
         Ok(String::from_utf8_lossy(&buf).into_owned())
     }
+}
+
+/// Discards stale bytes so a query reply is not mixed with earlier output.
+fn drain_pending(stream: &mut PrinterStream) {
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(10)));
+    let mut chunk = [0u8; 1024];
+    while let Ok(n) = stream.read(&mut chunk) {
+        if n == 0 {
+            break;
+        }
+    }
+}
+
+fn is_timeout(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut
+}
+
+/// Reads whatever is available until the printer is quiet for `READ_TIMEOUT`.
+fn read_idle(stream: &mut PrinterStream) -> Vec<u8> {
+    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 65536 {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
+/// Reads a query reply: waits up to `QUERY_READ_DEADLINE` for the first byte, then until
+/// `expected_etx` ETX frames arrived (or, when 0, until the printer goes quiet).
+fn read_query_reply(stream: &mut PrinterStream, expected_etx: usize) -> Vec<u8> {
+    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+    let deadline = Instant::now() + QUERY_READ_DEADLINE;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    while Instant::now() < deadline {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 65536 {
+                    break;
+                }
+                if expected_etx > 0 && buf.iter().filter(|b| **b == ETX).count() >= expected_etx {
+                    break;
+                }
+            }
+            Err(e) if is_timeout(&e) => {
+                if !buf.is_empty() && expected_etx == 0 {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    buf
 }
 
 fn open_serial_path(path: &str) -> Result<Box<dyn serialport::SerialPort>, String> {
@@ -641,5 +739,113 @@ mod tests {
         assert_eq!(sessions.len(), MAX_DEVICE_SESSIONS);
         assert!(!sessions.contains_key("MOCK0"));
         assert!(sessions.contains_key("MOCK-new"));
+    }
+
+    #[test]
+    fn query_reply_frames_classification() {
+        assert_eq!(query_reply_frames(b"~hs\r\n"), Some(3));
+        assert_eq!(query_reply_frames(b"~HI\r\n"), Some(1));
+        assert_eq!(query_reply_frames(b"^XA^HH^XZ"), Some(1));
+        assert_eq!(
+            query_reply_frames(b"! U1 getvar \"device.host_status\"\r\n"),
+            Some(0)
+        );
+        assert_eq!(query_reply_frames(b"^XA^FDHi^FS^XZ"), None);
+    }
+
+    fn mock_printer(port: u16) -> PrinterInfo {
+        PrinterInfo {
+            name: None,
+            model: "ZD421".into(),
+            firmware: String::new(),
+            serial_number: "MOCK1".into(),
+            address: "127.0.0.1".into(),
+            port: 0,
+            print_port: port,
+            config_port: 80,
+            connection: CONNECTION_NETWORK.into(),
+        }
+    }
+
+    /// Mock printer that waits `delay_ms` after receiving a command, then sends `frames` with gaps.
+    fn spawn_replying_printer(
+        delay_ms: u64,
+        frames: Vec<Vec<u8>>,
+        gap_ms: u64,
+    ) -> (u16, thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let _ = stream.read(&mut buf).unwrap();
+            thread::sleep(Duration::from_millis(delay_ms));
+            for frame in frames {
+                stream.write_all(&frame).unwrap();
+                thread::sleep(Duration::from_millis(gap_ms));
+            }
+            thread::sleep(Duration::from_millis(300));
+        });
+        (port, handle)
+    }
+
+    #[test]
+    fn read_after_hs_waits_for_all_three_etx_frames() {
+        let frames = vec![
+            b"\x02030,0,0,0,000,0,0,0,000,0,0,0\x03\r\n".to_vec(),
+            b"\x02000,0,0,0,0,2,4,0,00000000,1,000\x03\r\n".to_vec(),
+            b"\x021234,0\x03\r\n".to_vec(),
+        ];
+        // First byte after 600 ms and 400 ms gaps exceed the old 250 ms idle read.
+        let (port, handle) = spawn_replying_printer(600, frames, 400);
+        let pool = DeviceSessionPool::new();
+        let printer = mock_printer(port);
+        pool.write("MOCK1", &printer, b"~hs\r\n").unwrap();
+        let reply = pool.read("MOCK1", &printer).unwrap();
+        assert_eq!(reply.matches('\u{3}').count(), 3, "reply: {reply:?}");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn read_after_hi_returns_single_frame() {
+        let (port, handle) = spawn_replying_printer(
+            500,
+            vec![b"\x02ZD421-203dpi,V84.20.18Z,8,8176KB\x03\r\n".to_vec()],
+            0,
+        );
+        let pool = DeviceSessionPool::new();
+        let printer = mock_printer(port);
+        pool.write("MOCK1", &printer, b"~hi\r\n").unwrap();
+        let reply = pool.read("MOCK1", &printer).unwrap();
+        assert!(
+            reply.contains("ZD421") && reply.ends_with("\u{3}\r\n"),
+            "reply: {reply:?}"
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn read_after_getvar_returns_value_without_etx() {
+        let (port, handle) = spawn_replying_printer(400, vec![b"\"ready\"".to_vec()], 0);
+        let pool = DeviceSessionPool::new();
+        let printer = mock_printer(port);
+        pool.write("MOCK1", &printer, b"! U1 getvar \"device.host_status\"\r\n")
+            .unwrap();
+        let reply = pool.read("MOCK1", &printer).unwrap();
+        assert_eq!(reply, "\"ready\"");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn read_after_plain_print_uses_idle_read() {
+        let (port, handle) = spawn_replying_printer(0, vec![], 0);
+        let pool = DeviceSessionPool::new();
+        let printer = mock_printer(port);
+        pool.write("MOCK1", &printer, b"^XA^FDHi^FS^XZ").unwrap();
+        let started = Instant::now();
+        let reply = pool.read("MOCK1", &printer).unwrap();
+        assert!(reply.is_empty());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        handle.join().unwrap();
     }
 }
