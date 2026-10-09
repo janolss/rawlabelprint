@@ -406,8 +406,10 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &quit_i])?;
 
             let tray_tooltip = format!("RawLabelPrint {}", env!("CARGO_PKG_VERSION"));
+            // Black + alpha only. macOS treats this as a template and tints it.
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
             let tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .menu(&menu)
                 .tooltip(&tray_tooltip)
                 .on_menu_event(|app, event| match event.id.as_ref() {
