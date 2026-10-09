@@ -43,6 +43,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Cargo audit
+        run: cargo audit --manifest-path src-tauri/Cargo.toml
+
       - run: npm test
 
   linux-deb:

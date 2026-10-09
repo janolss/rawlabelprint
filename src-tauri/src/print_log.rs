@@ -1,5 +1,6 @@
 //! In-memory ring buffer of recent print requests for Settings debug UI.
 
+use crate::config::Connection;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -19,6 +20,8 @@ pub struct PrintLogEntry {
     pub printer_name: String,
     pub printer_address: String,
     pub print_port: u16,
+    #[serde(skip)]
+    pub connection: Connection,
     pub data_preview: String,
     pub data_bytes: usize,
     pub truncated: bool,
@@ -75,9 +78,7 @@ impl PrintLog {
     pub fn record(
         &self,
         route: impl Into<String>,
-        printer_name: impl Into<String>,
-        printer_address: impl Into<String>,
-        print_port: u16,
+        printer: &crate::config::PrinterInfo,
         data: &[u8],
         result: Result<(), String>,
     ) {
@@ -94,9 +95,14 @@ impl PrintLog {
             id: guard.next_id,
             timestamp_ms: now_ms(),
             route: route.into(),
-            printer_name: printer_name.into(),
-            printer_address: printer_address.into(),
-            print_port: if print_port == 0 { 9100 } else { print_port },
+            printer_name: printer.display_name(),
+            printer_address: printer.address.clone(),
+            print_port: if printer.connection == Connection::Network && printer.print_port == 0 {
+                9100
+            } else {
+                printer.print_port
+            },
+            connection: printer.connection,
             data_preview,
             data_bytes: data.len(),
             truncated: preview_truncated || stored_truncated,
@@ -192,6 +198,21 @@ fn truncate_stored(data: &[u8], max_bytes: usize) -> (Vec<u8>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::PrinterInfo;
+
+    fn printer(name: &str, address: &str) -> PrinterInfo {
+        PrinterInfo {
+            name: Some(name.into()),
+            model: String::new(),
+            firmware: String::new(),
+            serial_number: String::new(),
+            address: address.into(),
+            port: 0,
+            print_port: 9100,
+            config_port: 80,
+            connection: Connection::Network,
+        }
+    }
 
     #[test]
     fn ring_buffer_evicts_oldest() {
@@ -202,7 +223,12 @@ mod tests {
             guard.max_preview_bytes = 16;
         }
         for i in 0..5 {
-            log.record("/", format!("p{i}"), "10.0.0.1", 9100, b"^XA^XZ", Ok(()));
+            log.record(
+                "/",
+                &printer(&format!("p{i}"), "10.0.0.1"),
+                b"^XA^XZ",
+                Ok(()),
+            );
         }
         let entries = log.list();
         assert_eq!(entries.len(), 3);
@@ -217,7 +243,7 @@ mod tests {
             let mut guard = log.inner.lock().unwrap();
             guard.max_preview_bytes = 8;
         }
-        log.record("/", "A", "1.1.1.1", 9100, b"0123456789ABCDEF", Ok(()));
+        log.record("/", &printer("A", "1.1.1.1"), b"0123456789ABCDEF", Ok(()));
         let entries = log.list();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].truncated);
@@ -234,7 +260,7 @@ mod tests {
             guard.max_stored_bytes = 4;
             guard.max_preview_bytes = 100;
         }
-        log.record("/", "A", "1.1.1.1", 9100, b"0123456789", Ok(()));
+        log.record("/", &printer("A", "1.1.1.1"), b"0123456789", Ok(()));
         let e = &log.list()[0];
         assert_eq!(e.data_bytes, 10);
         assert_eq!(e.data, b"0123");
@@ -246,9 +272,7 @@ mod tests {
         let log = PrintLog::new();
         log.record(
             "/write",
-            "ZD421",
-            "192.168.1.50",
-            9100,
+            &printer("ZD421", "192.168.1.50"),
             b"^XA^XZ",
             Err("Could not connect".into()),
         );
@@ -262,7 +286,7 @@ mod tests {
     fn list_summaries_omit_payload_but_get_keeps_it() {
         let log = PrintLog::new();
         let payload = b"^XA^FDHi^FS^XZ";
-        log.record("/", "A", "10.0.0.1", 9100, payload, Ok(()));
+        log.record("/", &printer("A", "10.0.0.1"), payload, Ok(()));
         let id = log.list_summaries()[0].id;
 
         let summary = log.list_summaries().remove(0);
@@ -275,7 +299,7 @@ mod tests {
     #[test]
     fn get_by_id_returns_full_payload() {
         let log = PrintLog::new();
-        log.record("/", "A", "10.0.0.1", 9100, b"^XA^FDHi^FS^XZ", Ok(()));
+        log.record("/", &printer("A", "10.0.0.1"), b"^XA^FDHi^FS^XZ", Ok(()));
         let id = log.list()[0].id;
         let entry = log.get(id).expect("entry");
         assert_eq!(entry.data, b"^XA^FDHi^FS^XZ");

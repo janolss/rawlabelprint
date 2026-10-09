@@ -1,9 +1,26 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-pub const CONNECTION_NETWORK: &str = "network";
-pub const CONNECTION_USB: &str = "usb";
+const MAX_DENIED_ORIGINS: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Connection {
+    #[default]
+    Network,
+    Usb,
+}
+
+impl Connection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Network => "network",
+            Self::Usb => "usb",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,8 +43,8 @@ pub struct PrinterInfo {
     #[serde(default = "default_config_port")]
     pub config_port: u16,
     /// `"network"` (TCP RAW) or `"usb"` (CDC/serial).
-    #[serde(default = "default_connection")]
-    pub connection: String,
+    #[serde(default)]
+    pub connection: Connection,
 }
 
 fn default_print_port() -> u16 {
@@ -38,21 +55,13 @@ fn default_config_port() -> u16 {
     80
 }
 
-fn default_connection() -> String {
-    CONNECTION_NETWORK.into()
-}
-
 impl PrinterInfo {
     pub fn is_usb(&self) -> bool {
-        self.connection.eq_ignore_ascii_case(CONNECTION_USB)
+        self.connection == Connection::Usb
     }
 
     pub fn browser_print_connection(&self) -> &'static str {
-        if self.is_usb() {
-            CONNECTION_USB
-        } else {
-            CONNECTION_NETWORK
-        }
+        self.connection.as_str()
     }
 
     pub fn display_name(&self) -> String {
@@ -68,15 +77,13 @@ impl PrinterInfo {
         }
     }
 
+    #[cfg(test)]
     pub fn matches_name(&self, query: &str) -> bool {
         let q = query.trim();
         if q.is_empty() {
             return false;
         }
         if self.address.eq_ignore_ascii_case(q) {
-            return true;
-        }
-        if self.model.eq_ignore_ascii_case(q) {
             return true;
         }
         if self.display_name().eq_ignore_ascii_case(q) {
@@ -140,6 +147,9 @@ pub struct AppConfig {
     /// Browser Origins allowed to print via the local HTTP API (soft allowlist).
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    /// Browser Origins that must not print until removed in Settings.
+    #[serde(default)]
+    pub denied_origins: Vec<String>,
 }
 
 fn default_listen_address() -> String {
@@ -160,7 +170,23 @@ fn default_browser_print_compatible() -> bool {
 }
 
 fn default_debug_logging() -> bool {
-    true
+    false
+}
+
+pub fn parse_ip_address(address: &str) -> Result<String, String> {
+    let address = address.trim();
+    if address.parse::<IpAddr>().is_err() {
+        return Err("Address must be an IP address".into());
+    }
+    Ok(address.to_string())
+}
+
+pub fn require_listen_port(port: u16) -> Result<u16, String> {
+    if port == 0 {
+        Err("Port must be between 1 and 65535".into())
+    } else {
+        Ok(port)
+    }
 }
 
 impl Default for AppConfig {
@@ -174,6 +200,7 @@ impl Default for AppConfig {
             browser_print_compatible: default_browser_print_compatible(),
             debug_logging: default_debug_logging(),
             allowed_origins: Vec::new(),
+            denied_origins: Vec::new(),
         }
     }
 }
@@ -190,14 +217,52 @@ impl AppConfig {
             .any(|o| Self::normalize_origin(o) == key)
     }
 
+    pub fn is_origin_denied(&self, origin: &str) -> bool {
+        let key = Self::normalize_origin(origin);
+        self.denied_origins
+            .iter()
+            .any(|o| Self::normalize_origin(o) == key)
+    }
+
     /// Insert origin into the soft allowlist. Returns true if newly added.
     pub fn allow_origin(&mut self, origin: &str) -> bool {
         let key = Self::normalize_origin(origin);
-        if key.is_empty() || self.is_origin_allowed(&key) {
+        if key.is_empty() {
+            return false;
+        }
+        self.denied_origins
+            .retain(|o| Self::normalize_origin(o) != key);
+        if self.is_origin_allowed(&key) {
             return false;
         }
         self.allowed_origins.push(key);
         true
+    }
+
+    /// Record a denial. Drops the oldest entry past the cap. Returns true if newly stored.
+    pub fn deny_origin(&mut self, origin: &str) -> bool {
+        let key = Self::normalize_origin(origin);
+        if key.is_empty() {
+            return false;
+        }
+        self.allowed_origins
+            .retain(|o| Self::normalize_origin(o) != key);
+        if self.is_origin_denied(&key) {
+            return false;
+        }
+        if self.denied_origins.len() >= MAX_DENIED_ORIGINS {
+            self.denied_origins.remove(0);
+        }
+        self.denied_origins.push(key);
+        true
+    }
+
+    pub fn remove_denied_origin(&mut self, origin: &str) -> bool {
+        let key = Self::normalize_origin(origin);
+        let before = self.denied_origins.len();
+        self.denied_origins
+            .retain(|o| Self::normalize_origin(o) != key);
+        self.denied_origins.len() != before
     }
 
     /// Remove origin from the soft allowlist. Returns true if it was present.
@@ -255,6 +320,16 @@ impl AppConfig {
         if address.is_empty() {
             return Err("Address is required".into());
         }
+        let address = if self
+            .added_printers
+            .iter()
+            .find(|p| p.address == original_address)
+            .is_some_and(|p| p.is_usb())
+        {
+            address
+        } else {
+            parse_ip_address(&address)?
+        };
         if address != original_address && self.added_printers.iter().any(|p| p.address == address) {
             return Err(format!("A printer with address {address} already exists"));
         }
@@ -295,7 +370,13 @@ pub fn config_path(app_data_dir: &Path) -> PathBuf {
 pub fn load_config(app_data_dir: &Path) -> AppConfig {
     let path = config_path(app_data_dir);
     let mut config = match fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+        Ok(contents) => match serde_json::from_str(&contents) {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!("Ignoring unreadable config at {}: {err}", path.display());
+                AppConfig::default()
+            }
+        },
         Err(_) => AppConfig::default(),
     };
     config.listen_address = sanitize_listen_address(&config.listen_address);
@@ -326,7 +407,7 @@ mod tests {
             port: 0,
             print_port: 9100,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         }
     }
 
@@ -353,12 +434,12 @@ mod tests {
             port: 0,
             print_port: 9100,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         };
         assert_eq!(p.display_name(), "Shipping");
         assert!(p.matches_name("shipping"));
         assert!(p.matches_name("10.0.0.5"));
-        assert!(p.matches_name("ZD421"));
+        assert!(!p.matches_name("ZD421"));
     }
 
     #[test]
@@ -392,14 +473,14 @@ mod tests {
         assert_eq!(without.browser_print_uid(), "net:10.0.0.5:9100");
 
         let usb = PrinterInfo {
-            connection: CONNECTION_USB.into(),
+            connection: Connection::Usb,
             print_port: 0,
             config_port: 0,
             address: "/dev/ttyACM0".into(),
             ..sample_printer("/dev/ttyACM0", "")
         };
         assert_eq!(usb.browser_print_uid(), "usb:/dev/ttyACM0");
-        assert_eq!(usb.browser_print_connection(), CONNECTION_USB);
+        assert_eq!(usb.browser_print_connection(), "usb");
     }
 
     #[test]
@@ -594,5 +675,36 @@ mod tests {
         let raw = fs::read_to_string(config_path(&path)).unwrap();
         assert!(raw.contains("127.0.0.1"));
         assert!(!raw.contains("0.0.0.0"));
+    }
+
+    #[test]
+    fn deny_origin_removes_allow_and_is_cleared_on_allow() {
+        let mut cfg = AppConfig::default();
+        assert!(cfg.allow_origin("https://app.example"));
+        assert!(cfg.deny_origin("https://app.example"));
+        assert!(cfg.is_origin_denied("https://app.example"));
+        assert!(!cfg.is_origin_allowed("https://app.example"));
+        assert!(cfg.allow_origin("https://app.example"));
+        assert!(!cfg.is_origin_denied("https://app.example"));
+        assert!(cfg.is_origin_allowed("https://app.example"));
+    }
+
+    #[test]
+    fn parse_ip_address_rejects_hostnames() {
+        assert!(parse_ip_address("192.168.1.50").is_ok());
+        assert!(parse_ip_address("printer.local").is_err());
+        assert!(require_listen_port(0).is_err());
+        assert_eq!(require_listen_port(9100).unwrap(), 9100);
+    }
+
+    #[test]
+    fn load_config_unknown_connection_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let json = r#"{"addedPrinters":[{"model":"ZD421","address":"10.0.0.1","connection":"bluetooth"}]}"#;
+        fs::write(config_path(&path), json).unwrap();
+        let loaded = load_config(&path);
+        assert!(loaded.added_printers.is_empty());
+        assert!(!loaded.debug_logging);
     }
 }

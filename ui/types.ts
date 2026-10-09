@@ -27,6 +27,7 @@ export interface AppConfig {
 export interface OriginPermissions {
   allowed: string[];
   pending: string[];
+  denied: string[];
 }
 
 export interface PrinterStatus {

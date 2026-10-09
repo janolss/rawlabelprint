@@ -2,7 +2,7 @@ use crate::config::PrinterInfo;
 use crate::http_server::HttpSharedState;
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BrowserDeviceRef {
@@ -23,12 +23,7 @@ pub(crate) async fn list_printers_json(state: &HttpSharedState) -> String {
 
 pub(crate) async fn collect_known_printers(state: &HttpSharedState) -> Vec<PrinterInfo> {
     let config = state.config.read().await;
-    let discovered = state.discovered.read().await;
-
-    let mut by_key: HashMap<String, PrinterInfo> = HashMap::new();
-    for p in discovered.iter() {
-        by_key.insert(p.address.clone(), p.clone());
-    }
+    let mut by_key: BTreeMap<String, PrinterInfo> = BTreeMap::new();
     for p in config.added_printers.iter() {
         by_key.insert(p.address.clone(), p.clone());
     }
@@ -38,33 +33,51 @@ pub(crate) async fn collect_known_printers(state: &HttpSharedState) -> Vec<Print
     by_key.into_values().collect()
 }
 
+fn unique_name_match(printers: &[PrinterInfo], query: &str) -> Option<PrinterInfo> {
+    let hits: Vec<PrinterInfo> = printers
+        .iter()
+        .filter(|p| {
+            p.display_name().eq_ignore_ascii_case(query)
+                || p.name
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(query))
+        })
+        .cloned()
+        .collect();
+    if hits.len() == 1 {
+        hits.into_iter().next()
+    } else {
+        None
+    }
+}
+
 pub(crate) async fn resolve_printer(
     state: &HttpSharedState,
     printer_name: &str,
 ) -> Option<PrinterInfo> {
     let config = state.config.read().await;
-    let discovered = state.discovered.read().await;
-
-    if printer_name.trim().is_empty() {
+    let query = printer_name.trim();
+    if query.is_empty() {
         return config.default_printer.clone();
     }
 
-    if let Some(p) = &config.default_printer {
-        if p.matches_name(printer_name) {
-            return Some(p.clone());
+    let printers = {
+        let mut by_key: BTreeMap<String, PrinterInfo> = BTreeMap::new();
+        for p in config.added_printers.iter() {
+            by_key.insert(p.address.clone(), p.clone());
         }
-    }
-    for p in config.added_printers.iter() {
-        if p.matches_name(printer_name) {
-            return Some(p.clone());
+        if let Some(p) = &config.default_printer {
+            by_key.insert(p.address.clone(), p.clone());
         }
+        by_key.into_values().collect::<Vec<_>>()
+    };
+
+    if let Some(p) = printers.iter().find(|p| {
+        p.address.eq_ignore_ascii_case(query) || p.browser_print_uid().eq_ignore_ascii_case(query)
+    }) {
+        return Some(p.clone());
     }
-    for p in discovered.iter() {
-        if p.matches_name(printer_name) {
-            return Some(p.clone());
-        }
-    }
-    None
+    unique_name_match(&printers, query)
 }
 
 pub(crate) async fn resolve_by_device_ref(
@@ -94,9 +107,7 @@ pub(crate) async fn resolve_by_device_ref(
         }
     }
     if !name.is_empty() {
-        if let Some(p) = printers.iter().find(|p| p.matches_name(name)) {
-            return Some(p.clone());
-        }
+        return unique_name_match(&printers, name);
     }
     None
 }
@@ -109,7 +120,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_printer_by_empty_name_uses_default() {
         let printer = sample_printer("10.0.0.1", "SN1");
-        let state = test_state(true, Some(printer.clone()), vec![]);
+        let state = test_state(true, Some(printer.clone()));
         let resolved = resolve_printer(&state, "").await;
         assert_eq!(resolved.unwrap().address, "10.0.0.1");
     }
@@ -117,7 +128,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_by_device_ref_uid_serial_and_net() {
         let printer = sample_printer("10.0.0.1", "SN1");
-        let state = test_state(true, Some(printer.clone()), vec![]);
+        let state = test_state(true, Some(printer.clone()));
 
         let by_serial = resolve_by_device_ref(
             &state,
@@ -161,5 +172,21 @@ mod tests {
         )
         .await;
         assert!(miss.is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_printer_does_not_match_model_alone() {
+        let state = test_state(true, None);
+        {
+            let mut cfg = state.config.write().await;
+            cfg.upsert_printer(sample_printer("10.0.0.1", "SN1"), true);
+            cfg.upsert_printer(sample_printer("10.0.0.2", "SN2"), false);
+        }
+        assert!(resolve_printer(&state, "ZD421").await.is_none());
+        let by_address = resolve_printer(&state, "10.0.0.2").await.unwrap();
+        assert_eq!(by_address.serial_number, "SN2");
+        let listed = collect_known_printers(&state).await;
+        assert_eq!(listed[0].address, "10.0.0.1");
+        assert_eq!(listed[1].address, "10.0.0.2");
     }
 }

@@ -1,7 +1,8 @@
 //! Discover Zebra printers attached over USB CDC/ACM (serial).
 
-use crate::config::{PrinterInfo, CONNECTION_USB};
+use crate::config::{Connection, PrinterInfo};
 use serialport::{SerialPortType, UsbPortInfo};
+use std::sync::Mutex;
 
 /// Zebra Technologies USB vendor ID.
 pub const ZEBRA_USB_VID: u16 = 0x0A5F;
@@ -19,7 +20,7 @@ fn from_usb_port(port_name: String, info: UsbPortInfo) -> PrinterInfo {
         port: 0,
         print_port: 0,
         config_port: 0,
-        connection: CONNECTION_USB.into(),
+        connection: Connection::Usb,
     }
 }
 
@@ -75,8 +76,11 @@ pub fn merge_discovered(network: Vec<PrinterInfo>, usb: Vec<PrinterInfo>) -> Vec
     out
 }
 
+static DISCOVERY_LOCK: Mutex<()> = Mutex::new(());
+
 /// Run UDP LAN discovery and USB enumeration; USB still returned if UDP fails.
 pub fn search_all_printers() -> Result<Vec<PrinterInfo>, String> {
+    let _guard = DISCOVERY_LOCK.lock().map_err(|e| e.to_string())?;
     let network = match crate::discovery::search_zebra_printers() {
         Ok(list) => list,
         Err(e) => {
@@ -94,7 +98,7 @@ pub fn search_all_printers() -> Result<Vec<PrinterInfo>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::CONNECTION_NETWORK;
+    use crate::config::Connection;
 
     fn net_printer(addr: &str, serial: &str) -> PrinterInfo {
         PrinterInfo {
@@ -106,7 +110,7 @@ mod tests {
             port: 0,
             print_port: 9100,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         }
     }
 
@@ -120,7 +124,7 @@ mod tests {
             port: 0,
             print_port: 0,
             config_port: 0,
-            connection: CONNECTION_USB.into(),
+            connection: Connection::Usb,
         }
     }
 
@@ -144,5 +148,32 @@ mod tests {
         );
         assert_eq!(merged.len(), 1);
         assert!(!merged[0].is_usb());
+    }
+
+    #[test]
+    fn discovery_lock_excludes_overlapping_callers() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let inside = Arc::new(AtomicUsize::new(0));
+        let max_inside = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let inside = inside.clone();
+            let max_inside = max_inside.clone();
+            handles.push(thread::spawn(move || {
+                let _guard = DISCOVERY_LOCK.lock().unwrap();
+                let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                max_inside.fetch_max(now, Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(40));
+                inside.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(max_inside.load(Ordering::SeqCst), 1);
     }
 }

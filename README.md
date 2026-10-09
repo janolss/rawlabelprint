@@ -42,6 +42,12 @@ Print (POST):
 
 If `printer` is omitted/empty, the **default printer** selected in Settings is used.
 
+Only printers saved in Settings are listed or printed. A search result is not visible to clients until it is saved.
+
+Browser pages must be approved once under **Allowed websites**. A browser request that omits `Origin` is rejected. Clients that send neither `Origin` nor browser `Sec-Fetch-*` headers (for example curl) are not gated. Denied websites stay denied until removed in Settings.
+
+`sendUrl` loads `http://` resources. Loopback, link-local, and multicast addresses are rejected. Private LAN addresses are allowed.
+
 CORS: `Access-Control-Allow-Origin: *`
 
 Open `test/index.html` in a browser for a simple interactive test page.

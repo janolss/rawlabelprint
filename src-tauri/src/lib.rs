@@ -8,7 +8,10 @@ mod print_log;
 mod state;
 mod usb_discovery;
 
-use config::{load_config, sanitize_listen_address, AppConfig, PrinterInfo, CONNECTION_NETWORK};
+use config::{
+    load_config, parse_ip_address, require_listen_port, sanitize_listen_address, AppConfig,
+    Connection, PrinterInfo,
+};
 use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
 use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogSummary;
@@ -46,6 +49,7 @@ async fn save_settings(
     app: AppHandle,
 ) -> Result<AppConfig, String> {
     {
+        let port = require_listen_port(port)?;
         let mut cfg = state.config.write().await;
         let listen_address = sanitize_listen_address(&listen_address);
         let restart_needed = cfg.listen_address != listen_address || cfg.port != port;
@@ -76,13 +80,10 @@ async fn save_settings(
 }
 
 #[tauri::command]
-async fn discover_printers(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<PrinterInfo>, String> {
+async fn discover_printers() -> Result<Vec<PrinterInfo>, String> {
     let printers = tauri::async_runtime::spawn_blocking(search_all_printers)
         .await
         .map_err(|e| e.to_string())??;
-    *state.discovered.write().await = printers.clone();
     Ok(printers)
 }
 
@@ -106,9 +107,7 @@ async fn add_manual_printer(
     address: String,
     print_port: u16,
 ) -> Result<AppConfig, String> {
-    if address.trim().is_empty() {
-        return Err("Address is required".into());
-    }
+    let address = parse_ip_address(&address)?;
     let printer = PrinterInfo {
         name: Some(if name.trim().is_empty() {
             address.clone()
@@ -122,7 +121,7 @@ async fn add_manual_printer(
         port: 0,
         print_port: if print_port == 0 { 9100 } else { print_port },
         config_port: 80,
-        connection: CONNECTION_NETWORK.into(),
+        connection: Connection::Network,
     };
     {
         let mut cfg = state.config.write().await;
@@ -194,9 +193,7 @@ async fn test_print(
     };
     // Minimal ZPL test label
     let zpl = "^XA^FO50,50^A0N,40,40^FDRawLabelPrint OK^FS^XZ";
-    let name = target.display_name();
-    let address = target.address.clone();
-    let print_port = target.print_port;
+    let logged = target.clone();
     let zpl_for_send = zpl.to_string();
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::print::send_raw_to_printer(&target, &zpl_for_send)
@@ -204,14 +201,7 @@ async fn test_print(
     .await
     .map_err(|e| e.to_string())?;
     state
-        .record_print_log(
-            "test_print",
-            &name,
-            &address,
-            print_port,
-            zpl.as_bytes(),
-            result.clone(),
-        )
+        .record_print_log("test_print", &logged, zpl.as_bytes(), result.clone())
         .await;
     result
 }
@@ -264,7 +254,29 @@ async fn deny_origin(
     state: tauri::State<'_, Arc<AppState>>,
     origin: String,
 ) -> Result<OriginPermissions, String> {
-    dismiss_pending(&state.http_shared(), &origin).await;
+    let key = AppConfig::normalize_origin(&origin);
+    if key.is_empty() {
+        return Err("Origin is required".into());
+    }
+    {
+        let mut cfg = state.config.write().await;
+        cfg.deny_origin(&key);
+    }
+    dismiss_pending(&state.http_shared(), &key).await;
+    state.persist().await?;
+    Ok(permissions_snapshot(&state.http_shared()).await)
+}
+
+#[tauri::command]
+async fn remove_denied_origin(
+    state: tauri::State<'_, Arc<AppState>>,
+    origin: String,
+) -> Result<OriginPermissions, String> {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.remove_denied_origin(&origin);
+    }
+    state.persist().await?;
     Ok(permissions_snapshot(&state.http_shared()).await)
 }
 
@@ -322,7 +334,12 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("RawLabelPrint"));
-            std::fs::create_dir_all(&app_data_dir).ok();
+            if let Err(err) = std::fs::create_dir_all(&app_data_dir) {
+                tracing::error!(
+                    "Could not create config directory {}: {err}",
+                    app_data_dir.display()
+                );
+            }
 
             let config = load_config(&app_data_dir);
             let state = Arc::new(AppState::new(app_data_dir, config.clone()));
@@ -361,28 +378,6 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = state_for_http.restart_http().await {
                     tracing::error!("HTTP server failed to start: {e}");
-                }
-            });
-
-            // Background LAN/USB discovery so Browser Print /available is populated
-            let state_for_discovery = state.clone();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    let enabled = state_for_discovery
-                        .config
-                        .read()
-                        .await
-                        .browser_print_compatible;
-                    if enabled {
-                        match tauri::async_runtime::spawn_blocking(search_all_printers).await {
-                            Ok(Ok(printers)) => {
-                                *state_for_discovery.discovered.write().await = printers;
-                            }
-                            Ok(Err(e)) => tracing::warn!("Discovery failed: {e}"),
-                            Err(e) => tracing::warn!("Discovery task failed: {e}"),
-                        }
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(45)).await;
                 }
             });
 
@@ -462,6 +457,7 @@ pub fn run() {
             get_origin_permissions,
             approve_origin,
             deny_origin,
+            remove_denied_origin,
             revoke_origin
         ])
         .run(tauri::generate_context!())

@@ -1,7 +1,7 @@
-//! Soft allowlist for browser `Origin` on print requests.
+//! Soft allowlist for browser `Origin` on print and device requests.
 //!
-//! Requests without an Origin header (curl/scripts) are allowed.
-//! Browser origins must be approved once in Settings before printing.
+//! Requests without an Origin header and without browser `Sec-Fetch-*` metadata
+//! (curl/scripts) are allowed. Browser origins must be approved once in Settings.
 
 use crate::http_server::HttpSharedState;
 use axum::http::{HeaderMap, StatusCode};
@@ -32,17 +32,42 @@ pub fn deny_message(origin: &str) -> String {
     )
 }
 
-/// Returns Ok(()) if printing is allowed. On first sight of a new origin, queues it for approval.
+pub fn denied_message(origin: &str) -> String {
+    format!("Website is not allowed to print ({origin}).")
+}
+
+fn browser_fetch_metadata(headers: &HeaderMap) -> bool {
+    headers.contains_key("sec-fetch-site")
+        || headers.contains_key("sec-fetch-mode")
+        || headers.contains_key("sec-fetch-dest")
+}
+
+/// Origin string used to isolate device sessions. Empty when the client sent none.
+pub fn session_origin(headers: &HeaderMap) -> String {
+    request_origin(headers).unwrap_or_default()
+}
+
+/// Returns Ok(()) if the request may use printers.
+/// A new browser origin is queued for approval. A denied origin is not queued again.
 pub async fn ensure_origin_allowed(
     state: &HttpSharedState,
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, String)> {
     let Some(origin) = request_origin(headers) else {
+        if browser_fetch_metadata(headers) {
+            return Err((
+                DENIED_STATUS,
+                "Browser request is missing an Origin header.".into(),
+            ));
+        }
         return Ok(());
     };
 
     {
         let cfg = state.config.read().await;
+        if cfg.is_origin_denied(&origin) {
+            return Err((DENIED_STATUS, denied_message(&origin)));
+        }
         if cfg.is_origin_allowed(&origin) {
             return Ok(());
         }
@@ -86,17 +111,22 @@ pub async fn dismiss_pending(state: &HttpSharedState, origin: &str) -> bool {
 pub struct OriginPermissions {
     pub allowed: Vec<String>,
     pub pending: Vec<String>,
+    pub denied: Vec<String>,
 }
 
 pub async fn permissions_snapshot(state: &HttpSharedState) -> OriginPermissions {
-    let allowed = {
+    let (mut allowed, mut denied) = {
         let cfg = state.config.read().await;
-        let mut list = cfg.allowed_origins.clone();
-        list.sort();
-        list
+        (cfg.allowed_origins.clone(), cfg.denied_origins.clone())
     };
+    allowed.sort();
+    denied.sort();
     let pending = list_pending(state).await;
-    OriginPermissions { allowed, pending }
+    OriginPermissions {
+        allowed,
+        pending,
+        denied,
+    }
 }
 
 #[cfg(test)]
@@ -124,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_origin_is_allowed() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         assert!(ensure_origin_allowed(&state, &HeaderMap::new())
             .await
             .is_ok());
@@ -132,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_origin_is_denied_and_queued() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         let err = ensure_origin_allowed(&state, &headers_with_origin("https://app.example"))
             .await
             .unwrap_err();
@@ -144,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn allowed_origin_passes() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         {
             let mut cfg = state.config.write().await;
             cfg.allow_origin("https://app.example");
@@ -159,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn duplicate_pending_does_not_grow() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         let h = headers_with_origin("https://a.test");
         let _ = ensure_origin_allowed(&state, &h).await;
         let _ = ensure_origin_allowed(&state, &h).await;
@@ -168,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn pending_origin_limit_does_not_stop_denial() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         for index in 0..MAX_PENDING_ORIGINS {
             let origin = format!("https://{index}.test");
             assert!(ensure_origin_allowed(&state, &headers_with_origin(&origin))
@@ -215,7 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn permissions_snapshot_sorts_allowed() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         {
             let mut cfg = state.config.write().await;
             cfg.allow_origin("https://b.test");
@@ -228,5 +258,33 @@ mod tests {
             vec!["https://a.test".to_string(), "https://b.test".to_string()]
         );
         assert_eq!(snap.pending, vec!["https://c.test".to_string()]);
+        assert!(snap.denied.is_empty());
+    }
+
+    #[tokio::test]
+    async fn browser_metadata_without_origin_is_denied() {
+        let state = test_state(true, None);
+        let mut headers = HeaderMap::new();
+        headers.insert("sec-fetch-mode", HeaderValue::from_static("no-cors"));
+        headers.insert("sec-fetch-dest", HeaderValue::from_static("image"));
+        let err = ensure_origin_allowed(&state, &headers).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert!(list_pending(&state).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn denied_origin_is_not_queued() {
+        let state = test_state(true, None);
+        {
+            let mut cfg = state.config.write().await;
+            cfg.deny_origin("https://blocked.test");
+        }
+        let err = ensure_origin_allowed(&state, &headers_with_origin("https://blocked.test"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert!(list_pending(&state).await.is_empty());
+        let snap = permissions_snapshot(&state).await;
+        assert_eq!(snap.denied, vec!["https://blocked.test".to_string()]);
     }
 }

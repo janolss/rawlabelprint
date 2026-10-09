@@ -1,7 +1,7 @@
 //! Zebra LAN discovery using the Browser Print UDP protocol (port 4201).
 //! Ported from reference/desktop/src/main.js `search-zebra-printers`.
 
-use crate::config::{PrinterInfo, CONNECTION_NETWORK};
+use crate::config::{Connection, PrinterInfo};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
@@ -96,7 +96,7 @@ pub fn search_zebra_printers() -> Result<Vec<PrinterInfo>, String> {
                             port: src.port(),
                             print_port: 9100,
                             config_port: 80,
-                            connection: CONNECTION_NETWORK.into(),
+                            connection: Connection::Network,
                         },
                     );
                 }

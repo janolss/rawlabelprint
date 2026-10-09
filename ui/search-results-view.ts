@@ -59,13 +59,13 @@ export function connectionStatusBadgeHtml(
   if (!status) return "";
   const detail = status.detail ? ` ${escapeHtml(status.detail)}` : "";
   if (status.errorMessages?.length) {
-    return `<div style="margin-top:6px"><span class="badge bad">Offline</span> ${escapeHtml(status.errorMessages.join(", "))}${detail ? `<div class="muted" style="margin-top:4px">${detail}</div>` : ""}</div>`;
+    return `<div class="conn-status-line"><span class="badge bad">Offline</span> ${escapeHtml(status.errorMessages.join(", "))}${detail ? `<div class="muted conn-status-detail">${detail}</div>` : ""}</div>`;
   }
   if (status.status === "online") {
     const warn = status.warningMessages?.length
       ? ` <span class="badge warn">${escapeHtml(status.warningMessages.join(", "))}</span>`
       : "";
-    return `<div style="margin-top:6px"><span class="badge ok">Online</span>${warn}</div>`;
+    return `<div class="conn-status-line"><span class="badge ok">Online</span>${warn}</div>`;
   }
-  return `<div style="margin-top:6px"><span class="badge bad">Offline</span>${detail ? `<div class="muted" style="margin-top:4px">${detail}</div>` : ""}</div>`;
+  return `<div class="conn-status-line"><span class="badge bad">Offline</span>${detail ? `<div class="muted conn-status-detail">${detail}</div>` : ""}</div>`;
 }

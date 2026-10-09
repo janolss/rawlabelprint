@@ -26,22 +26,23 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, oneshot, Mutex, RwLock};
+use tokio::sync::{broadcast, oneshot, Mutex, RwLock, Semaphore};
 use tower_http::cors::{Any, CorsLayer};
 
 /// Max HTTP request body size (simple API, /write, /convert, …).
 pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
+pub const MAX_CONCURRENT_DEVICE_IO: usize = 4;
 pub type PendingOrigins = BTreeMap<String, Instant>;
 
 #[derive(Clone)]
 pub struct HttpSharedState {
     pub config: Arc<RwLock<AppConfig>>,
-    pub discovered: Arc<RwLock<Vec<PrinterInfo>>>,
     pub sessions: Arc<DeviceSessionPool>,
     pub print_log: Arc<PrintLog>,
     pub pending_origins: Arc<RwLock<PendingOrigins>>,
     /// Notifies UI when a new origin needs approval (may have no subscribers in tests).
     pub pending_tx: broadcast::Sender<String>,
+    pub device_io: Arc<Semaphore>,
 }
 
 impl HttpSharedState {
@@ -55,14 +56,7 @@ impl HttpSharedState {
         if !self.config.read().await.debug_logging {
             return;
         }
-        self.print_log.record(
-            route,
-            printer.display_name(),
-            printer.address.clone(),
-            printer.print_port,
-            data,
-            result,
-        );
+        self.print_log.record(route, printer, data, result);
     }
 }
 
@@ -122,12 +116,14 @@ pub async fn start_http_server(
     let (tx, rx) = oneshot::channel::<()>();
 
     tokio::spawn(async move {
-        axum::serve(listener, app)
+        if let Err(err) = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = rx.await;
             })
             .await
-            .ok();
+        {
+            tracing::error!("HTTP server stopped: {err}");
+        }
     });
 
     Ok(HttpServerHandle {

@@ -38,6 +38,15 @@ pub(crate) fn text_ok(body: String) -> Response {
         .into_response()
 }
 
+pub(crate) fn public_print_error(err: &str) -> String {
+    let lower = err.to_ascii_lowercase();
+    if lower.contains("writ") {
+        "Could not write to the printer".into()
+    } else {
+        "Could not reach the printer".into()
+    }
+}
+
 pub(crate) fn empty_ok() -> Response {
     (
         StatusCode::OK,

@@ -50,12 +50,15 @@ const els = {
   clearPrintLogBtn: requireEl<HTMLButtonElement>("clearPrintLogBtn"),
   originPendingList: requireEl<HTMLElement>("originPendingList"),
   originAllowedList: requireEl<HTMLElement>("originAllowedList"),
+  originDeniedList: requireEl<HTMLElement>("originDeniedList"),
 };
 
 let currentConfig: AppConfig | null = null;
 let lastDiscovered: PrinterInfo[] = [];
 const printerStatuses = new Map<string, UiPrinterStatus>();
+const statusCheckedAt = new Map<string, number>();
 let statusRefreshSeq = 0;
+const STATUS_DEBOUNCE_MS = 30_000;
 
 function defaultAddress(): string | null {
   return currentConfig?.defaultPrinter?.address ?? null;
@@ -111,17 +114,24 @@ async function refreshPrinterStatus(address: string): Promise<void> {
   try {
     const result = await checkPrinterStatus(printer);
     printerStatuses.set(address, result);
+    statusCheckedAt.set(address, Date.now());
   } catch (e) {
     printerStatuses.set(address, {
       kind: "offline",
       detail: String(e),
     });
+    statusCheckedAt.set(address, Date.now());
   }
   updateStatusBadgeInDom(address);
 }
 
-async function refreshAllPrinterStatuses(): Promise<void> {
-  const printers = currentConfig?.addedPrinters || [];
+async function refreshAllPrinterStatuses(respectDebounce = false): Promise<void> {
+  const now = Date.now();
+  const printers = (currentConfig?.addedPrinters || []).filter((printer) => {
+    if (!respectDebounce) return true;
+    const checkedAt = statusCheckedAt.get(printer.address) ?? 0;
+    return now - checkedAt >= STATUS_DEBOUNCE_MS;
+  });
   if (!printers.length) return;
   const seq = ++statusRefreshSeq;
   for (const p of printers) {
@@ -134,12 +144,14 @@ async function refreshAllPrinterStatuses(): Promise<void> {
         const result = await checkPrinterStatus(printer);
         if (seq !== statusRefreshSeq) return;
         printerStatuses.set(printer.address, result);
+        statusCheckedAt.set(printer.address, Date.now());
       } catch (e) {
         if (seq !== statusRefreshSeq) return;
         printerStatuses.set(printer.address, {
           kind: "offline",
           detail: String(e),
         });
+        statusCheckedAt.set(printer.address, Date.now());
       }
       if (seq === statusRefreshSeq) {
         updateStatusBadgeInDom(printer.address);
@@ -262,7 +274,7 @@ function applyConfig(config: AppConfig): void {
     els.launchAtLogin.removeAttribute("title");
   }
   els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
-  els.debugLogging.checked = config.debugLogging !== false;
+  els.debugLogging.checked = !!config.debugLogging;
   renderSaved(config.addedPrinters || []);
   updateApiUrl();
 }
@@ -300,6 +312,24 @@ function renderOriginPermissions(perms: OriginPermissions): void {
       .join("");
   }
 
+  const denied = perms.denied ?? [];
+  if (!denied.length) {
+    els.originDeniedList.innerHTML = "";
+  } else {
+    els.originDeniedList.innerHTML = denied
+      .map(
+        (origin) => `
+      <div class="origin-row" data-origin="${escapeHtml(origin)}">
+        <span class="badge bad">Denied</span>
+        <span class="origin-url" title="${escapeHtml(origin)}">${escapeHtml(origin)}</span>
+        <div class="button-row inline">
+          <button type="button" data-origin-action="forget">Remove</button>
+        </div>
+      </div>`
+      )
+      .join("");
+  }
+
   if (!perms.allowed.length) {
     els.originAllowedList.innerHTML =
       '<div class="printer-card muted">No websites approved yet</div>';
@@ -325,6 +355,7 @@ async function refreshOriginPermissions(): Promise<void> {
     renderOriginPermissions(perms);
   } catch (e) {
     els.originPendingList.innerHTML = "";
+    els.originDeniedList.innerHTML = "";
     els.originAllowedList.innerHTML = `<div class="printer-card"><span class="badge bad">${escapeHtml(String(e))}</span></div>`;
   }
 }
@@ -416,7 +447,9 @@ async function handleOriginAction(
         ? "approve_origin"
         : action === "deny"
           ? "deny_origin"
-          : "revoke_origin";
+          : action === "forget"
+            ? "remove_denied_origin"
+            : "revoke_origin";
     const perms = await invoke<OriginPermissions>(command, { origin });
     renderOriginPermissions(perms);
   } catch (e) {
@@ -428,6 +461,18 @@ async function handleOriginAction(
 }
 
 els.originPendingList.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
+  if (!btn) return;
+  const row = btn.closest<HTMLElement>("[data-origin]");
+  const origin = row?.dataset.origin;
+  const action = btn.dataset.originAction;
+  if (!origin || !action) return;
+  void handleOriginAction(action, origin, btn);
+});
+
+els.originDeniedList.addEventListener("click", (e) => {
   const target = e.target;
   if (!(target instanceof Element)) return;
   const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
@@ -583,7 +628,7 @@ document.querySelectorAll<HTMLElement>(".tab").forEach((tab) => {
 getCurrentWindow()
   .onFocusChanged(({ payload: focused }) => {
     if (focused) {
-      void refreshAllPrinterStatuses();
+      void refreshAllPrinterStatuses(true);
       refreshPrintLog().catch((e) => console.error(e));
     }
   })

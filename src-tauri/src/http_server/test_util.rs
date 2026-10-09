@@ -1,7 +1,7 @@
 #![cfg(test)]
 
-use crate::config::{AppConfig, PrinterInfo, CONNECTION_NETWORK};
-use crate::http_server::{build_app_router, HttpSharedState};
+use crate::config::{AppConfig, Connection, PrinterInfo};
+use crate::http_server::{build_app_router, HttpSharedState, MAX_CONCURRENT_DEVICE_IO};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
 use axum::response::Response;
@@ -9,7 +9,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 
 pub(crate) fn sample_printer(address: &str, serial: &str) -> PrinterInfo {
     PrinterInfo {
@@ -21,7 +21,7 @@ pub(crate) fn sample_printer(address: &str, serial: &str) -> PrinterInfo {
         port: 0,
         print_port: 9100,
         config_port: 80,
-        connection: CONNECTION_NETWORK.into(),
+        connection: Connection::Network,
     }
 }
 
@@ -35,15 +35,11 @@ pub(crate) fn lan_printer(address: &str, print_port: u16) -> PrinterInfo {
         port: 0,
         print_port,
         config_port: 80,
-        connection: CONNECTION_NETWORK.into(),
+        connection: Connection::Network,
     }
 }
 
-pub(crate) fn test_state(
-    compatible: bool,
-    default: Option<PrinterInfo>,
-    discovered: Vec<PrinterInfo>,
-) -> HttpSharedState {
+pub(crate) fn test_state(compatible: bool, default: Option<PrinterInfo>) -> HttpSharedState {
     let mut config = AppConfig {
         browser_print_compatible: compatible,
         ..Default::default()
@@ -54,11 +50,11 @@ pub(crate) fn test_state(
     let (pending_tx, _) = tokio::sync::broadcast::channel(8);
     HttpSharedState {
         config: Arc::new(RwLock::new(config)),
-        discovered: Arc::new(RwLock::new(discovered)),
         sessions: Arc::new(DeviceSessionPool::new()),
         print_log: Arc::new(PrintLog::new()),
         pending_origins: Arc::new(RwLock::new(crate::http_server::PendingOrigins::new())),
         pending_tx,
+        device_io: Arc::new(Semaphore::new(MAX_CONCURRENT_DEVICE_IO)),
     }
 }
 
@@ -75,11 +71,11 @@ pub(crate) async fn state_with_printer(
     let (pending_tx, _) = tokio::sync::broadcast::channel(8);
     HttpSharedState {
         config: Arc::new(RwLock::new(config)),
-        discovered: Arc::new(RwLock::new(Vec::new())),
         sessions: Arc::new(DeviceSessionPool::new()),
         print_log: Arc::new(PrintLog::new()),
         pending_origins: Arc::new(RwLock::new(crate::http_server::PendingOrigins::new())),
         pending_tx,
+        device_io: Arc::new(Semaphore::new(MAX_CONCURRENT_DEVICE_IO)),
     }
 }
 

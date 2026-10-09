@@ -135,7 +135,7 @@
             <section class="block">
               <h3 class="block-subtitle">Debug</h3>
               <label class="checkbox">
-                <input type="checkbox" id="debugLogging" checked />
+                <input type="checkbox" id="debugLogging" />
                 Capture recent print requests
               </label>
               <p class="hint">
@@ -146,11 +146,14 @@
             <section class="block">
               <h3 class="block-subtitle">Allowed websites</h3>
               <p class="hint">
-                The first print from a new website requires approval here. Requests without an
-                <code>Origin</code> header (e.g. scripts) are not gated.
+                The first print or device list from a new website requires approval here. Browser
+                requests without an <code>Origin</code> header are rejected. Local scripts that do
+                not send browser fetch metadata are not gated. Denied websites stay denied until
+                removed.
               </p>
               <div id="originPendingList" class="origin-list"></div>
               <div id="originAllowedList" class="origin-list"></div>
+              <div id="originDeniedList" class="origin-list"></div>
             </section>
           </div>
         </div>

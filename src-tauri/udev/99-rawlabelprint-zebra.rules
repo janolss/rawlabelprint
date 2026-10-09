@@ -1,3 +1,3 @@
 # Allow raw USB access to Zebra CDC/ACM printers for RawLabelPrint (non-root).
 # Vendor ID 0x0A5F = Zebra Technologies.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0a5f", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0a5f", MODE="0660", TAG+="uaccess"

@@ -1,6 +1,6 @@
 use crate::http_server::origin::ensure_origin_allowed;
 use crate::http_server::resolve::{list_printers_json, resolve_printer};
-use crate::http_server::response::json_ok;
+use crate::http_server::response::{json_ok, public_print_error};
 use crate::http_server::HttpSharedState;
 use crate::print::send_raw_to_printer;
 use axum::body::Bytes;
@@ -72,6 +72,9 @@ async fn handle_get(
     let print_data = query.data.unwrap_or_default();
 
     if printer_name.is_empty() && print_data.is_empty() {
+        if let Err((status, msg)) = ensure_origin_allowed(state, headers).await {
+            return Err((status, json!({ "error": msg }).to_string()));
+        }
         return Ok(list_printers_json(state).await);
     }
 
@@ -119,14 +122,32 @@ pub(crate) async fn do_print(
         )
     })?;
 
-    let result = send_raw_to_printer(&printer, print_data);
+    let permit = state.device_io.clone().try_acquire_owned().map_err(|_| {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({ "error": "Too many print operations" }).to_string(),
+        )
+    })?;
+    let printer_for_send = printer.clone();
+    let payload = print_data.to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        send_raw_to_printer(&printer_for_send, &payload)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "error": public_print_error(&e.to_string()) }).to_string(),
+        )
+    })?;
     state
         .record_print("/", &printer, print_data.as_bytes(), result.clone())
         .await;
     result.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": e }).to_string(),
+            json!({ "error": public_print_error(&e) }).to_string(),
         )
     })?;
 
@@ -150,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_api_lists_printers() {
-        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")), vec![]);
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
         let app = build_test_router(state);
         let response = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -230,5 +251,22 @@ mod tests {
             .read()
             .await
             .contains_key("https://evil.test"));
+    }
+
+    #[tokio::test]
+    async fn browser_image_get_without_origin_is_rejected() {
+        let state = state_with_printer(lan_printer("127.0.0.1", 9100), true).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "sec-fetch-mode",
+            axum::http::HeaderValue::from_static("no-cors"),
+        );
+        headers.insert(
+            "sec-fetch-dest",
+            axum::http::HeaderValue::from_static("image"),
+        );
+        let err = do_print(&state, &headers, "", "^XA^XZ").await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert!(state.pending_origins.read().await.is_empty());
     }
 }

@@ -6,7 +6,7 @@ use crate::usb_discovery::find_port_path_by_serial;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -101,19 +101,24 @@ fn query_reply_frames(data: &[u8]) -> Option<usize> {
     let t = text.trim();
     if t.starts_with("~hs") {
         Some(3)
-    } else if t.starts_with("~hi") || t.contains("^hh") {
+    } else if t.starts_with("~hi") || t == "^xa^hh^xz" {
         Some(1)
-    } else if t.contains("getvar") || t.starts_with("~hq") {
+    } else if t.starts_with("! u1 getvar") || t.starts_with("~hq") {
         Some(0)
     } else {
         None
     }
 }
 
-/// Open I/O sessions keyed by Browser Print device uid (write then read).
+pub(crate) fn session_key(origin: &str, uid: &str) -> String {
+    format!("{origin}\u{1}{uid}")
+}
+
+/// Open I/O sessions keyed by client origin and device uid (write then read).
 #[derive(Default)]
 pub struct DeviceSessionPool {
     inner: Mutex<HashMap<String, DeviceSession>>,
+    gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl DeviceSessionPool {
@@ -151,18 +156,53 @@ impl DeviceSessionPool {
         );
     }
 
+    fn gate_for(
+        gates: &Mutex<HashMap<String, Arc<Mutex<()>>>>,
+        key: &str,
+    ) -> Result<Arc<Mutex<()>>, String> {
+        let mut map = gates.lock().map_err(|e| e.to_string())?;
+        Ok(map
+            .entry(key.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone())
+    }
+
+    fn drop_idle_gates(
+        gates: &mut HashMap<String, Arc<Mutex<()>>>,
+        live: &HashMap<String, DeviceSession>,
+    ) {
+        gates.retain(|key, gate| live.contains_key(key) || gate.try_lock().is_err());
+    }
+
     pub fn purge_idle_sessions(&self) {
-        if let Ok(mut map) = self.inner.lock() {
-            Self::purge_idle(&mut map);
+        let Ok(mut map) = self.inner.lock() else {
+            return;
+        };
+        Self::purge_idle(&mut map);
+        if let Ok(mut gates) = self.gates.lock() {
+            Self::drop_idle_gates(&mut gates, &map);
         }
     }
 
-    pub fn write(&self, uid: &str, printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
-        let mut map = self.inner.lock().map_err(|e| e.to_string())?;
-        Self::purge_idle(&mut map);
-
+    pub fn write(
+        &self,
+        uid: &str,
+        origin: &str,
+        printer: &PrinterInfo,
+        data: &[u8],
+    ) -> Result<(), String> {
+        let key = session_key(origin, uid);
+        let gate = Self::gate_for(&self.gates, &key)?;
+        let _gate = gate.lock().map_err(|e| e.to_string())?;
         let query = query_reply_frames(data);
-        if let Some(session) = map.get_mut(uid) {
+
+        let existing = {
+            let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+            Self::purge_idle(&mut map);
+            map.remove(&key)
+        };
+
+        let mut stream = if let Some(mut session) = existing {
             if query.is_some() {
                 drain_pending(&mut session.stream);
             }
@@ -172,37 +212,38 @@ impl DeviceSessionPool {
                 .and_then(|_| session.stream.flush())
             {
                 Ok(()) => {
-                    session.last_used = Instant::now();
-                    session.expected_etx = query.unwrap_or(0);
-                    session.awaiting_reply = query.is_some();
+                    let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+                    Self::insert_session(&mut map, &key, session.stream, query);
                     return Ok(());
                 }
-                Err(_) => {
-                    map.remove(uid);
-                }
+                Err(_) => connect_printer(printer)?,
             }
-        }
+        } else {
+            connect_printer(printer)?
+        };
 
-        let mut stream = connect_printer(printer)?;
         stream
             .write_all(data)
             .map_err(|e| format!("Failed writing to printer: {e}"))?;
         let _ = stream.flush();
-        Self::insert_session(&mut map, uid, stream, query);
+        let mut map = self.inner.lock().map_err(|e| e.to_string())?;
+        Self::insert_session(&mut map, &key, stream, query);
         Ok(())
     }
 
-    pub fn read(&self, uid: &str, printer: &PrinterInfo) -> Result<String, String> {
-        // Take the session out so a slow reply does not block other printers.
+    pub fn read(&self, uid: &str, origin: &str, printer: &PrinterInfo) -> Result<String, String> {
+        let key = session_key(origin, uid);
+        let gate = Self::gate_for(&self.gates, &key)?;
+        let _gate = gate.lock().map_err(|e| e.to_string())?;
+
         let taken = {
             let mut map = self.inner.lock().map_err(|e| e.to_string())?;
             Self::purge_idle(&mut map);
-            map.remove(uid)
+            map.remove(&key)
         };
         let mut session = match taken {
             Some(s) => s,
             None => DeviceSession {
-                // Open a fresh connection so a lone /read still returns something (often empty).
                 stream: connect_printer(printer)?,
                 last_used: Instant::now(),
                 expected_etx: 0,
@@ -220,7 +261,7 @@ impl DeviceSessionPool {
         session.last_used = Instant::now();
 
         let mut map = self.inner.lock().map_err(|e| e.to_string())?;
-        Self::insert_session(&mut map, uid, session.stream, None);
+        Self::insert_session(&mut map, &key, session.stream, None);
         Ok(String::from_utf8_lossy(&buf).into_owned())
     }
 }
@@ -585,7 +626,7 @@ fn extract_hex_flags(line: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::CONNECTION_NETWORK;
+    use crate::config::Connection;
     use std::io::Read;
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -653,12 +694,12 @@ mod tests {
             port: 0,
             print_port: port,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         };
         let zpl = b"^XA^FDHi^FS^XZ";
         {
             let pool = DeviceSessionPool::new();
-            pool.write("MOCK1", &printer, zpl).unwrap();
+            pool.write("MOCK1", "", &printer, zpl).unwrap();
         } // drop closes TCP so mock read_to_end completes
 
         handle.join().unwrap();
@@ -683,15 +724,15 @@ mod tests {
             port: 0,
             print_port: port,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         };
         let pool = DeviceSessionPool::new();
-        pool.write("MOCK1", &printer, b"x").unwrap();
+        pool.write("MOCK1", "", &printer, b"x").unwrap();
         handle.join().unwrap();
         pool.inner
             .lock()
             .unwrap()
-            .get_mut("MOCK1")
+            .get_mut(&session_key("", "MOCK1"))
             .unwrap()
             .last_used = Instant::now() - SESSION_IDLE - Duration::from_secs(1);
 
@@ -720,25 +761,26 @@ mod tests {
             port: 0,
             print_port: port,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         };
         let pool = DeviceSessionPool::new();
         for index in 0..MAX_DEVICE_SESSIONS {
-            pool.write(&format!("MOCK{index}"), &printer, b"x").unwrap();
+            pool.write(&format!("MOCK{index}"), "", &printer, b"x")
+                .unwrap();
         }
         pool.inner
             .lock()
             .unwrap()
-            .get_mut("MOCK0")
+            .get_mut(&session_key("", "MOCK0"))
             .unwrap()
             .last_used = Instant::now() - Duration::from_secs(5);
-        pool.write("MOCK-new", &printer, b"x").unwrap();
+        pool.write("MOCK-new", "", &printer, b"x").unwrap();
         handle.join().unwrap();
 
         let sessions = pool.inner.lock().unwrap();
         assert_eq!(sessions.len(), MAX_DEVICE_SESSIONS);
-        assert!(!sessions.contains_key("MOCK0"));
-        assert!(sessions.contains_key("MOCK-new"));
+        assert!(!sessions.contains_key(&session_key("", "MOCK0")));
+        assert!(sessions.contains_key(&session_key("", "MOCK-new")));
     }
 
     #[test]
@@ -751,6 +793,7 @@ mod tests {
             Some(0)
         );
         assert_eq!(query_reply_frames(b"^XA^FDHi^FS^XZ"), None);
+        assert_eq!(query_reply_frames(b"^XA^FDgetvar^FS^XZ"), None);
     }
 
     fn mock_printer(port: u16) -> PrinterInfo {
@@ -763,7 +806,7 @@ mod tests {
             port: 0,
             print_port: port,
             config_port: 80,
-            connection: CONNECTION_NETWORK.into(),
+            connection: Connection::Network,
         }
     }
 
@@ -800,8 +843,8 @@ mod tests {
         let (port, handle) = spawn_replying_printer(600, frames, 400);
         let pool = DeviceSessionPool::new();
         let printer = mock_printer(port);
-        pool.write("MOCK1", &printer, b"~hs\r\n").unwrap();
-        let reply = pool.read("MOCK1", &printer).unwrap();
+        pool.write("MOCK1", "", &printer, b"~hs\r\n").unwrap();
+        let reply = pool.read("MOCK1", "", &printer).unwrap();
         assert_eq!(reply.matches('\u{3}').count(), 3, "reply: {reply:?}");
         handle.join().unwrap();
     }
@@ -815,8 +858,8 @@ mod tests {
         );
         let pool = DeviceSessionPool::new();
         let printer = mock_printer(port);
-        pool.write("MOCK1", &printer, b"~hi\r\n").unwrap();
-        let reply = pool.read("MOCK1", &printer).unwrap();
+        pool.write("MOCK1", "", &printer, b"~hi\r\n").unwrap();
+        let reply = pool.read("MOCK1", "", &printer).unwrap();
         assert!(
             reply.contains("ZD421") && reply.ends_with("\u{3}\r\n"),
             "reply: {reply:?}"
@@ -829,9 +872,14 @@ mod tests {
         let (port, handle) = spawn_replying_printer(400, vec![b"\"ready\"".to_vec()], 0);
         let pool = DeviceSessionPool::new();
         let printer = mock_printer(port);
-        pool.write("MOCK1", &printer, b"! U1 getvar \"device.host_status\"\r\n")
-            .unwrap();
-        let reply = pool.read("MOCK1", &printer).unwrap();
+        pool.write(
+            "MOCK1",
+            "",
+            &printer,
+            b"! U1 getvar \"device.host_status\"\r\n",
+        )
+        .unwrap();
+        let reply = pool.read("MOCK1", "", &printer).unwrap();
         assert_eq!(reply, "\"ready\"");
         handle.join().unwrap();
     }
@@ -841,9 +889,10 @@ mod tests {
         let (port, handle) = spawn_replying_printer(0, vec![], 0);
         let pool = DeviceSessionPool::new();
         let printer = mock_printer(port);
-        pool.write("MOCK1", &printer, b"^XA^FDHi^FS^XZ").unwrap();
+        pool.write("MOCK1", "", &printer, b"^XA^FDHi^FS^XZ")
+            .unwrap();
         let started = Instant::now();
-        let reply = pool.read("MOCK1", &printer).unwrap();
+        let reply = pool.read("MOCK1", "", &printer).unwrap();
         assert!(reply.is_empty());
         assert!(started.elapsed() < Duration::from_secs(1));
         handle.join().unwrap();

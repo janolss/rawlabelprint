@@ -2,11 +2,11 @@ use crate::http_server::fetch::fetch_url_bytes;
 use crate::http_server::multipart::{
     multipart_boundary, parse_multipart_parts, parse_write_request,
 };
-use crate::http_server::origin::ensure_origin_allowed;
+use crate::http_server::origin::{ensure_origin_allowed, session_origin};
 use crate::http_server::resolve::{
     collect_known_printers, resolve_by_device_ref, BrowserDeviceRef,
 };
-use crate::http_server::response::{empty_ok, json_err, json_ok, text_ok};
+use crate::http_server::response::{empty_ok, json_err, json_ok, public_print_error, text_ok};
 use crate::http_server::HttpSharedState;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -63,6 +63,7 @@ async fn require_compatible(state: &HttpSharedState) -> Result<(), Response> {
 pub(crate) async fn handle_available(
     State(state): State<HttpSharedState>,
     method: Method,
+    headers: HeaderMap,
 ) -> Response {
     if method == Method::OPTIONS {
         return (
@@ -74,6 +75,9 @@ pub(crate) async fn handle_available(
     }
     if let Err(resp) = require_compatible(&state).await {
         return resp;
+    }
+    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
+        return json_err(status, msg);
     }
 
     let printers = collect_known_printers(&state).await;
@@ -94,6 +98,7 @@ pub(crate) async fn handle_available(
 pub(crate) async fn handle_default(
     State(state): State<HttpSharedState>,
     method: Method,
+    headers: HeaderMap,
     Query(query): Query<DefaultQuery>,
 ) -> Response {
     if method == Method::OPTIONS {
@@ -106,6 +111,9 @@ pub(crate) async fn handle_default(
     }
     if let Err(resp) = require_compatible(&state).await {
         return resp;
+    }
+    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
+        return json_err(status, msg);
     }
 
     // BrowserPrint.js treats empty body as null default device.
@@ -174,12 +182,20 @@ pub(crate) async fn handle_write(
         return json_err(StatusCode::BAD_REQUEST, "No data or url provided");
     };
 
+    let permit = match state.device_io.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return json_err(StatusCode::TOO_MANY_REQUESTS, "Too many print operations");
+        }
+    };
     let uid = printer.browser_print_uid();
+    let origin = session_origin(&headers);
     let sessions = state.sessions.clone();
     let printer_for_write = printer.clone();
     let data_for_write = data.clone();
     let result = tokio::task::spawn_blocking(move || {
-        sessions.write(&uid, &printer_for_write, &data_for_write)
+        let _permit = permit;
+        sessions.write(&uid, &origin, &printer_for_write, &data_for_write)
     })
     .await;
 
@@ -191,8 +207,11 @@ pub(crate) async fn handle_write(
 
     match result {
         Ok(Ok(())) => json_ok("{}".into()),
-        Ok(Err(e)) => json_err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Err(e)) => json_err(StatusCode::INTERNAL_SERVER_ERROR, public_print_error(&e)),
+        Err(e) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            public_print_error(&e.to_string()),
+        ),
     }
 }
 
@@ -263,12 +282,23 @@ async fn handle_convert_inner(
         let printer = resolve_by_device_ref(state, &device)
             .await
             .ok_or_else(|| "Device not found".to_string())?;
+        let permit = match state.device_io.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                return Ok(json_err(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "Too many print operations",
+                ));
+            }
+        };
         let uid = printer.browser_print_uid();
+        let origin = session_origin(headers);
         let sessions = state.sessions.clone();
         let printer_for_write = printer.clone();
         let blob_for_write = blob.clone();
         let result = tokio::task::spawn_blocking(move || {
-            sessions.write(&uid, &printer_for_write, &blob_for_write)
+            let _permit = permit;
+            sessions.write(&uid, &origin, &printer_for_write, &blob_for_write)
         })
         .await
         .map_err(|e| e.to_string())
@@ -276,7 +306,12 @@ async fn handle_convert_inner(
         state
             .record_print("/convert", &printer, &blob, result.clone())
             .await;
-        result?;
+        if let Err(err) = result {
+            return Ok(json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                public_print_error(&err),
+            ));
+        }
         return Ok(json_ok("{}".into()));
     }
 
@@ -296,17 +331,20 @@ fn blob_looks_like_raw_label(blob: &[u8]) -> bool {
     let sample = &blob[..blob.len().min(512)];
     let text = String::from_utf8_lossy(sample);
     let t = text.trim_start();
-    t.starts_with('^')
-        || t.starts_with('~')
-        || t.contains("^XA")
-        || t.contains("^xz")
-        || t.contains("^XZ")
-        || t.starts_with("CT~~CD") // ZebraDesigner / Zebra setup preamble
+    let lower = t.to_ascii_lowercase();
+    lower.starts_with("^xa") || t.starts_with('~') || t.starts_with("CT~~CD")
 }
 
-pub(crate) async fn handle_read(State(state): State<HttpSharedState>, body: Bytes) -> Response {
+pub(crate) async fn handle_read(
+    State(state): State<HttpSharedState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if let Err(resp) = require_compatible(&state).await {
         return resp;
+    }
+    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
+        return json_err(status, msg);
     }
 
     let parsed: ReadBody = match serde_json::from_slice(&body) {
@@ -318,14 +356,28 @@ pub(crate) async fn handle_read(State(state): State<HttpSharedState>, body: Byte
         return json_err(StatusCode::NOT_FOUND, "Device not found");
     };
 
+    let permit = match state.device_io.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return json_err(StatusCode::TOO_MANY_REQUESTS, "Too many print operations");
+        }
+    };
     let uid = printer.browser_print_uid();
+    let origin = session_origin(&headers);
     let sessions = state.sessions.clone();
-    let result = tokio::task::spawn_blocking(move || sessions.read(&uid, &printer)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        sessions.read(&uid, &origin, &printer)
+    })
+    .await;
 
     match result {
         Ok(Ok(text)) => text_ok(text),
-        Ok(Err(e)) => json_err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Err(e)) => json_err(StatusCode::INTERNAL_SERVER_ERROR, public_print_error(&e)),
+        Err(e) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            public_print_error(&e.to_string()),
+        ),
     }
 }
 
@@ -348,7 +400,7 @@ mod tests {
         assert!(blob_looks_like_raw_label(b"^XA^XZ"));
         assert!(blob_looks_like_raw_label(b"CT~~CD,~CC^~CT~\n^XA"));
         assert!(blob_looks_like_raw_label(b"~HS"));
-        assert!(blob_looks_like_raw_label(b"prefix ^XZ suffix"));
+        assert!(!blob_looks_like_raw_label(b"prefix ^XZ suffix"));
         assert!(!blob_looks_like_raw_label(b"%PDF-1.4"));
         assert!(!blob_looks_like_raw_label(&[0xff, 0xd8, 0xff, 0xe0]));
     }
@@ -356,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn available_and_default_contract_when_compatible() {
         let printer = sample_printer("10.0.0.1", "SN1");
-        let state = test_state(true, Some(printer), vec![]);
+        let state = test_state(true, Some(printer));
         let app = build_test_router(state);
 
         let available = app
@@ -409,7 +461,7 @@ mod tests {
 
     #[tokio::test]
     async fn default_empty_body_when_no_default_printer() {
-        let state = test_state(true, None, vec![]);
+        let state = test_state(true, None);
         let app = build_test_router(state);
         let response = app
             .oneshot(
@@ -427,7 +479,7 @@ mod tests {
 
     #[tokio::test]
     async fn compatible_off_returns_404_for_bp_routes() {
-        let state = test_state(false, Some(sample_printer("10.0.0.1", "SN1")), vec![]);
+        let state = test_state(false, Some(sample_printer("10.0.0.1", "SN1")));
         let app = build_test_router(state);
 
         let available = app
@@ -473,7 +525,7 @@ mod tests {
 
         let mut printer = sample_printer("127.0.0.1", "MOCKWRITE");
         printer.print_port = port;
-        let state = test_state(true, Some(printer), vec![]);
+        let state = test_state(true, Some(printer));
         let app = build_test_router(state);
 
         let zpl = "^XA^FDHttpWrite^FS^XZ";
@@ -555,5 +607,36 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].route, "/convert");
         assert!(entries[0].ok);
+    }
+
+    #[tokio::test]
+    async fn available_and_read_require_an_approved_origin() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state.clone());
+        let available = app
+            .oneshot(
+                Request::builder()
+                    .uri("/available")
+                    .header(header::ORIGIN, "https://new.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(available.status(), StatusCode::FORBIDDEN);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://new.example"),
+        );
+        let response = handle_read(
+            State(state),
+            headers,
+            Bytes::from(r#"{"device":{"uid":"SN1"}}"#),
+        )
+        .await;
+        let (parts, _) = response.into_response().into_parts();
+        assert_eq!(parts.status, StatusCode::FORBIDDEN);
     }
 }

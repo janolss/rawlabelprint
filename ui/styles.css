@@ -345,6 +345,14 @@ button:disabled {
   margin-top: 6px;
 }
 
+.conn-status-line {
+  margin-top: 6px;
+}
+
+.conn-status-detail {
+  margin-top: 4px;
+}
+
 .origin-row {
   display: flex;
   align-items: center;
