@@ -40,7 +40,10 @@ pub(crate) fn text_ok(body: String) -> Response {
 
 pub(crate) fn public_print_error(err: &str) -> String {
     let lower = err.to_ascii_lowercase();
-    if lower.contains("writ") {
+    if lower.contains("delivery status is unknown") {
+        "Printer write failed; delivery status is unknown. Check the printer before retrying."
+            .into()
+    } else if lower.contains("writ") {
         "Could not write to the printer".into()
     } else {
         "Could not reach the printer".into()
@@ -57,4 +60,17 @@ pub(crate) fn empty_ok() -> Response {
         String::new(),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_write_delivery_is_reported_explicitly() {
+        assert!(
+            public_print_error("Printer write failed; delivery status is unknown: error")
+                .contains("Check the printer before retrying")
+        );
+    }
 }

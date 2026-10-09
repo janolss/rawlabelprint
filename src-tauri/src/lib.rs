@@ -9,8 +9,8 @@ mod state;
 mod usb_discovery;
 
 use config::{
-    load_config, parse_ip_address, require_listen_port, sanitize_listen_address, AppConfig,
-    Connection, PrinterInfo,
+    load_config, parse_ip_address, require_listen_port, sanitize_listen_address, save_config,
+    AppConfig, Connection, PrinterInfo,
 };
 use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
 use print::{get_printer_status, PrinterStatus};
@@ -48,32 +48,54 @@ async fn save_settings(
     debug_logging: bool,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
-    {
-        let port = require_listen_port(port)?;
-        let mut cfg = state.config.write().await;
-        let listen_address = sanitize_listen_address(&listen_address);
-        let restart_needed = cfg.listen_address != listen_address || cfg.port != port;
-        cfg.listen_address = listen_address;
-        cfg.port = port;
-        cfg.launch_at_login = launch_at_login;
-        cfg.browser_print_compatible = browser_print_compatible;
-        cfg.debug_logging = debug_logging;
-        drop(cfg);
-        state.persist().await?;
-        if restart_needed {
-            state.restart_http().await?;
-        }
-    }
-
-    // Keep autostart plugin in sync (never register the debug binary).
+    let port = require_listen_port(port)?;
+    let listen_address = sanitize_listen_address(&listen_address);
     use tauri_plugin_autostart::ManagerExt;
     let autostart = app.autolaunch();
-    if launch_at_login && autostart_registration_allowed() {
-        let _ = autostart.enable();
-    } else if !launch_at_login {
-        let _ = autostart.disable();
-    } else {
+    let mut cfg = state.config.write().await;
+    let previous = cfg.clone();
+    let restart_needed = previous.listen_address != listen_address || previous.port != port;
+    let autostart_changed = launch_at_login != previous.launch_at_login
+        && (!launch_at_login || autostart_registration_allowed());
+
+    if autostart_changed {
+        let result = if launch_at_login {
+            autostart.enable()
+        } else {
+            autostart.disable()
+        };
+        result.map_err(|err| format!("Failed to update autostart setting: {err}"))?;
+    } else if launch_at_login && !autostart_registration_allowed() {
         tracing::info!("Skipping autostart enable in debug/dev build");
+    }
+
+    let mut updated = previous.clone();
+    updated.listen_address = listen_address;
+    updated.port = port;
+    updated.launch_at_login = launch_at_login;
+    updated.browser_print_compatible = browser_print_compatible;
+    updated.debug_logging = debug_logging;
+    if let Err(err) = save_config(&state.app_data_dir, &updated) {
+        let rollback_result = if autostart_changed {
+            if previous.launch_at_login {
+                autostart.enable()
+            } else {
+                autostart.disable()
+            }
+        } else {
+            Ok(())
+        };
+        return match rollback_result {
+            Ok(()) => Err(err),
+            Err(rollback_err) => Err(format!(
+                "{err}; failed to restore autostart setting: {rollback_err}"
+            )),
+        };
+    }
+    *cfg = updated;
+    drop(cfg);
+    if restart_needed {
+        state.restart_http().await?;
     }
 
     Ok(state.config.read().await.clone())
@@ -170,10 +192,21 @@ async fn remove_added_printer(
 }
 
 #[tauri::command]
-async fn check_printer_status(printer: PrinterInfo) -> Result<PrinterStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || get_printer_status(&printer))
-        .await
-        .map_err(|e| e.to_string())
+async fn check_printer_status(
+    state: tauri::State<'_, Arc<AppState>>,
+    printer: PrinterInfo,
+) -> Result<PrinterStatus, String> {
+    let permit = state
+        .device_io
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| "Printer status check limit reached; retry shortly".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        get_printer_status(&printer)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -334,14 +367,15 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("RawLabelPrint"));
-            if let Err(err) = std::fs::create_dir_all(&app_data_dir) {
-                tracing::error!(
+            std::fs::create_dir_all(&app_data_dir).map_err(|err| {
+                format!(
                     "Could not create config directory {}: {err}",
                     app_data_dir.display()
-                );
-            }
+                )
+            })?;
 
-            let config = load_config(&app_data_dir);
+            let config = load_config(&app_data_dir)
+                .map_err(|err| format!("Failed to load application configuration: {err}"))?;
             let state = Arc::new(AppState::new(app_data_dir, config.clone()));
 
             let weak_state = Arc::downgrade(&state);
@@ -384,7 +418,9 @@ pub fn run() {
             // Sync autostart with saved preference (release builds only).
             if config.launch_at_login && autostart_registration_allowed() {
                 use tauri_plugin_autostart::ManagerExt;
-                let _ = app.autolaunch().enable();
+                if let Err(err) = app.autolaunch().enable() {
+                    tracing::error!("Failed to enable autostart: {err}");
+                }
             } else if config.launch_at_login {
                 tracing::info!("Skipping autostart sync in debug/dev build");
             }

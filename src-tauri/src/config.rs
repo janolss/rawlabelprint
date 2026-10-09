@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{ErrorKind, Write};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_DENIED_ORIGINS: usize = 128;
+static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -367,21 +371,47 @@ pub fn config_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("config.json")
 }
 
-pub fn load_config(app_data_dir: &Path) -> AppConfig {
+pub fn load_config(app_data_dir: &Path) -> Result<AppConfig, String> {
     let path = config_path(app_data_dir);
-    let mut config = match fs::read_to_string(&path) {
-        Ok(contents) => match serde_json::from_str(&contents) {
-            Ok(config) => config,
-            Err(err) => {
-                tracing::warn!("Ignoring unreadable config at {}: {err}", path.display());
-                AppConfig::default()
-            }
-        },
-        Err(_) => AppConfig::default(),
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(AppConfig::default()),
+        Err(err) => {
+            return Err(format!(
+                "Failed to read configuration at {}: {err}",
+                path.display()
+            ));
+        }
+    };
+    let mut config: AppConfig = match serde_json::from_str(&contents) {
+        Ok(config) => config,
+        Err(err) => {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| format!("Failed to create configuration backup name: {e}"))?
+                .as_nanos();
+            let backup_path = app_data_dir.join(format!(
+                "config.json.corrupt-{}-{timestamp}",
+                std::process::id()
+            ));
+            fs::rename(&path, &backup_path).map_err(|backup_err| {
+                format!(
+                    "Invalid configuration at {}: {err}; failed to preserve it at {}: {backup_err}",
+                    path.display(),
+                    backup_path.display()
+                )
+            })?;
+            tracing::warn!(
+                "Invalid configuration at {}; preserved as {}: {err}",
+                path.display(),
+                backup_path.display()
+            );
+            AppConfig::default()
+        }
     };
     config.listen_address = sanitize_listen_address(&config.listen_address);
     config.normalize_saved_printers();
-    config
+    Ok(config)
 }
 
 pub fn save_config(app_data_dir: &Path, config: &AppConfig) -> Result<(), String> {
@@ -390,7 +420,62 @@ pub fn save_config(app_data_dir: &Path, config: &AppConfig) -> Result<(), String
     let mut to_save = config.clone();
     to_save.listen_address = sanitize_listen_address(&to_save.listen_address);
     let json = serde_json::to_string_pretty(&to_save).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Configuration path has no parent directory".to_string())?;
+    let (temp_path, mut temp_file) = loop {
+        let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".config.json.{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => break (candidate, file),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(format!(
+                    "Failed to create temporary configuration file {}: {err}",
+                    candidate.display()
+                ));
+            }
+        }
+    };
+
+    let write_result = temp_file
+        .write_all(json.as_bytes())
+        .and_then(|_| temp_file.sync_all());
+    drop(temp_file);
+    if let Err(err) = write_result {
+        if let Err(cleanup_err) = fs::remove_file(&temp_path) {
+            tracing::warn!(
+                "Failed to remove temporary configuration file {}: {cleanup_err}",
+                temp_path.display()
+            );
+        }
+        return Err(format!(
+            "Failed to write temporary configuration file {}: {err}",
+            temp_path.display()
+        ));
+    }
+
+    if let Err(err) = fs::rename(&temp_path, &path) {
+        if let Err(cleanup_err) = fs::remove_file(&temp_path) {
+            tracing::warn!(
+                "Failed to remove temporary configuration file {}: {cleanup_err}",
+                temp_path.display()
+            );
+        }
+        return Err(format!(
+            "Failed to replace configuration file {}: {err}",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -591,8 +676,15 @@ mod tests {
         };
         cfg.upsert_printer(sample_printer("10.0.0.1", "S1"), true);
         save_config(&path, &cfg).unwrap();
+        assert_eq!(
+            fs::read_dir(&path)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>(),
+            vec!["config.json"]
+        );
 
-        let loaded = load_config(&path);
+        let loaded = load_config(&path).unwrap();
         assert!(!loaded.browser_print_compatible);
         assert_eq!(loaded.added_printers.len(), 1);
         assert_eq!(loaded.default_printer.as_ref().unwrap().address, "10.0.0.1");
@@ -601,7 +693,7 @@ mod tests {
     #[test]
     fn load_config_missing_file_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let loaded = load_config(dir.path());
+        let loaded = load_config(dir.path()).unwrap();
         assert_eq!(loaded.port, 9100);
         assert!(loaded.browser_print_compatible);
         assert!(loaded.added_printers.is_empty());
@@ -609,13 +701,25 @@ mod tests {
     }
 
     #[test]
-    fn load_config_corrupt_json_returns_defaults() {
+    fn load_config_reports_non_file_read_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(config_path(dir.path())).unwrap();
+        assert!(load_config(dir.path())
+            .unwrap_err()
+            .contains("Failed to read configuration"));
+    }
+
+    #[test]
+    fn load_config_corrupt_json_preserves_file_and_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
         fs::write(config_path(&path), "{not json").unwrap();
-        let loaded = load_config(&path);
+        let loaded = load_config(&path).unwrap();
         assert_eq!(loaded.port, 9100);
         assert!(loaded.browser_print_compatible);
+        assert!(!config_path(&path).exists());
+        let backup = fs::read_dir(&path).unwrap().next().unwrap().unwrap().path();
+        assert_eq!(fs::read_to_string(backup).unwrap(), "{not json");
     }
 
     #[test]
@@ -635,7 +739,7 @@ mod tests {
             "browserPrintCompatible": true
         }"#;
         fs::write(config_path(&path), json).unwrap();
-        let loaded = load_config(&path);
+        let loaded = load_config(&path).unwrap();
         assert_eq!(loaded.added_printers.len(), 1);
         assert_eq!(loaded.added_printers[0].address, "10.0.0.7");
     }
@@ -659,7 +763,7 @@ mod tests {
             "browserPrintCompatible": true
         }"#;
         fs::write(config_path(&path), json).unwrap();
-        let loaded = load_config(&path);
+        let loaded = load_config(&path).unwrap();
         assert_eq!(loaded.listen_address, "127.0.0.1");
     }
 
@@ -703,7 +807,7 @@ mod tests {
         let path = dir.path().to_path_buf();
         let json = r#"{"addedPrinters":[{"model":"ZD421","address":"10.0.0.1","connection":"bluetooth"}]}"#;
         fs::write(config_path(&path), json).unwrap();
-        let loaded = load_config(&path);
+        let loaded = load_config(&path).unwrap();
         assert!(loaded.added_printers.is_empty());
         assert!(!loaded.debug_logging);
     }

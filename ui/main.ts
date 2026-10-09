@@ -59,6 +59,7 @@ const printerStatuses = new Map<string, UiPrinterStatus>();
 const statusCheckedAt = new Map<string, number>();
 let statusRefreshSeq = 0;
 const STATUS_DEBOUNCE_MS = 30_000;
+const STATUS_CHECK_CONCURRENCY = 4;
 
 function defaultAddress(): string | null {
   return currentConfig?.defaultPrinter?.address ?? null;
@@ -138,26 +139,32 @@ async function refreshAllPrinterStatuses(respectDebounce = false): Promise<void>
     printerStatuses.set(p.address, { kind: "checking" });
     updateStatusBadgeInDom(p.address);
   }
-  await Promise.all(
-    printers.map(async (printer) => {
-      try {
-        const result = await checkPrinterStatus(printer);
-        if (seq !== statusRefreshSeq) return;
-        printerStatuses.set(printer.address, result);
-        statusCheckedAt.set(printer.address, Date.now());
-      } catch (e) {
-        if (seq !== statusRefreshSeq) return;
-        printerStatuses.set(printer.address, {
-          kind: "offline",
-          detail: String(e),
-        });
-        statusCheckedAt.set(printer.address, Date.now());
+  let nextPrinter = 0;
+  const workers = Array.from(
+    { length: Math.min(STATUS_CHECK_CONCURRENCY, printers.length) },
+    async () => {
+      while (nextPrinter < printers.length) {
+        const printer = printers[nextPrinter++];
+        try {
+          const result = await checkPrinterStatus(printer);
+          if (seq !== statusRefreshSeq) return;
+          printerStatuses.set(printer.address, result);
+          statusCheckedAt.set(printer.address, Date.now());
+        } catch (e) {
+          if (seq !== statusRefreshSeq) return;
+          printerStatuses.set(printer.address, {
+            kind: "offline",
+            detail: String(e),
+          });
+          statusCheckedAt.set(printer.address, Date.now());
+        }
+        if (seq === statusRefreshSeq) {
+          updateStatusBadgeInDom(printer.address);
+        }
       }
-      if (seq === statusRefreshSeq) {
-        updateStatusBadgeInDom(printer.address);
-      }
-    })
+    }
   );
+  await Promise.all(workers);
 }
 
 function bindStatusBadgeClicks(card: Element): void {
@@ -398,8 +405,11 @@ els.launchAtLogin.addEventListener("change", async () => {
   }
   try {
     currentConfig = await persistSettings();
+    applyConfig(currentConfig);
   } catch (e) {
     console.error(e);
+    if (currentConfig) applyConfig(currentConfig);
+    alert(`Could not update startup preference: ${e}`);
   }
 });
 

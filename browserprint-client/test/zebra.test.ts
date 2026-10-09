@@ -204,6 +204,16 @@ test("getInfo rejects with 'Invalid Response' and the queue keeps going", async 
   assert.equal((await next).getMessage(), "Ready");
 });
 
+test("callback errors without an error handler use defaultErrorCallback", async () => {
+  const { bp, printer } = setup({});
+  globalThis.fetch = async () => new Response("boom", { status: 500 });
+  const errors: string[] = [];
+  bp.defaultErrorCallback = (message) => errors.push(message);
+  printer.getInfo(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(errors, ["boom"]);
+});
+
 test("SGD get/set/setThenGet", async () => {
   const { printer, fake } = setup({
     'getvar "device.host_status"': '"ready"',

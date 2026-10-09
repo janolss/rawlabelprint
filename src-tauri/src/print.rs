@@ -5,7 +5,7 @@ use crate::config::PrinterInfo;
 use crate::usb_discovery::find_port_path_by_serial;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -206,26 +206,19 @@ impl DeviceSessionPool {
             if query.is_some() {
                 drain_pending(&mut session.stream);
             }
-            match session
-                .stream
-                .write_all(data)
-                .and_then(|_| session.stream.flush())
-            {
+            match write_payload(&mut session.stream, data) {
                 Ok(()) => {
                     let mut map = self.inner.lock().map_err(|e| e.to_string())?;
                     Self::insert_session(&mut map, &key, session.stream, query);
                     return Ok(());
                 }
-                Err(_) => connect_printer(printer)?,
+                Err(err) => return Err(err),
             }
         } else {
             connect_printer(printer)?
         };
 
-        stream
-            .write_all(data)
-            .map_err(|e| format!("Failed writing to printer: {e}"))?;
-        let _ = stream.flush();
+        write_payload(&mut stream, data)?;
         let mut map = self.inner.lock().map_err(|e| e.to_string())?;
         Self::insert_session(&mut map, &key, stream, query);
         Ok(())
@@ -369,14 +362,19 @@ fn connect_usb(printer: &PrinterInfo) -> Result<PrinterStream, String> {
 }
 
 fn connect_tcp(printer: &PrinterInfo) -> Result<PrinterStream, String> {
-    let addr: SocketAddr = format!("{}:{}", printer.address, printer.print_port)
-        .parse()
-        .map_err(|e| format!("Invalid printer address: {e}"))?;
+    let addr = printer_socket_addr(&printer.address, printer.print_port)?;
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .map_err(|e| format!("Could not connect to printer: {e}"))?;
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     Ok(PrinterStream::Tcp(stream))
+}
+
+fn printer_socket_addr(address: &str, port: u16) -> Result<SocketAddr, String> {
+    let ip = address
+        .parse::<IpAddr>()
+        .map_err(|e| format!("Invalid printer address: {e}"))?;
+    Ok(SocketAddr::new(ip, port))
 }
 
 fn connect_printer(printer: &PrinterInfo) -> Result<PrinterStream, String> {
@@ -394,11 +392,14 @@ pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), Stri
 pub fn send_raw_bytes_to_printer(printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
     let mut stream = connect_printer(printer)?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    write_payload(&mut stream, data)
+}
+
+fn write_payload(stream: &mut impl Write, data: &[u8]) -> Result<(), String> {
     stream
         .write_all(data)
-        .map_err(|e| format!("Failed writing to printer: {e}"))?;
-    let _ = stream.flush();
-    Ok(())
+        .and_then(|_| stream.flush())
+        .map_err(|e| format!("Printer write failed; delivery status is unknown: {e}"))
 }
 
 /// Probe printer online status via TCP print port + ~HQES, fallback to HTTP config port.
@@ -464,11 +465,16 @@ fn status_from_hqes(printer: &PrinterInfo, buf: &[u8]) -> PrinterStatus {
     let (errors, warnings) = decode_hqes(&response);
     status.error_messages = errors;
     status.warning_messages = warnings;
-    status.status = if status.error_messages.is_empty() {
-        "online".into()
+    if !has_valid_hqes_response(&response) {
+        status
+            .error_messages
+            .push("No valid ~HQES status response".into());
+        status.status = "offline".into();
+    } else if !status.error_messages.is_empty() {
+        status.status = "offline".into();
     } else {
-        "offline".into()
-    };
+        status.status = "online".into();
+    }
     if buf.is_empty() {
         status.detail = Some(format!(
             "Connected to {} (no ~HQES response)",
@@ -476,6 +482,58 @@ fn status_from_hqes(printer: &PrinterInfo, buf: &[u8]) -> PrinterStatus {
         ));
     }
     status
+}
+
+fn has_valid_hqes_response(response: &str) -> bool {
+    ["ERRORS:", "WARNINGS:"].iter().all(|marker| {
+        response
+            .lines()
+            .any(|line| extract_hqes_flags(line, marker).is_some())
+    })
+}
+
+/// One `~HQES` status line.
+///
+/// Zebra sends `<count> <8 hex digits> <8 hex digits>`. A single hex word is also accepted.
+struct HqesLine {
+    count: Option<u32>,
+    flags: u32,
+}
+
+fn extract_hqes_flags(line: &str, marker: &str) -> Option<HqesLine> {
+    let upper = line.to_ascii_uppercase();
+    let value = upper.split_once(marker)?.1.trim();
+    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let first = *tokens.first()?;
+    let parse_hex = |token: &str| -> Option<u32> {
+        let bare = token.strip_prefix("0X").unwrap_or(token);
+        if bare.is_empty() || !bare.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        u32::from_str_radix(bare, 16).ok()
+    };
+    let flag_word = |token: &str| {
+        let bare = token.strip_prefix("0X").unwrap_or(token);
+        bare.len() == 8 && bare.chars().all(|c| c.is_ascii_hexdigit())
+    };
+
+    if tokens.len() > 1 && !flag_word(first) {
+        let count = first.parse::<u32>().ok()?;
+        let mut flags = 0u32;
+        for token in &tokens[1..] {
+            flags |= parse_hex(token)?;
+        }
+        return Some(HqesLine {
+            count: Some(count),
+            flags,
+        });
+    }
+
+    let mut flags = 0u32;
+    for token in &tokens {
+        flags |= parse_hex(token)?;
+    }
+    Some(HqesLine { count: None, flags })
 }
 
 fn get_usb_printer_status(printer: &PrinterInfo) -> PrinterStatus {
@@ -527,8 +585,7 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
         detail: None,
     };
 
-    let print_addr: Result<SocketAddr, _> =
-        format!("{}:{}", printer.address, printer.print_port).parse();
+    let print_addr = printer_socket_addr(&printer.address, printer.print_port);
     let Ok(print_addr) = print_addr else {
         status.status = "offline".into();
         status.detail = Some(format!("Invalid address: {}", printer.address));
@@ -560,8 +617,7 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
         Err(e) => {
             let print_err = format!("TCP {}:{} — {e}", printer.address, printer.print_port);
             // Web UI is usually on config_port (80). Reachable HTTP helps diagnose permission vs RAW port.
-            let config_addr: Result<SocketAddr, _> =
-                format!("{}:{}", printer.address, config_port).parse();
+            let config_addr = printer_socket_addr(&printer.address, config_port);
             if let Ok(config_addr) = config_addr {
                 match TcpStream::connect_timeout(&config_addr, CONNECT_TIMEOUT) {
                     Ok(_) => {
@@ -595,32 +651,35 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
 fn decode_hqes(response: &str) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
+    let push_message = |out: &mut Vec<String>, kind: &str, parsed: &HqesLine| {
+        if parsed.flags != 0 {
+            out.push(format!(
+                "Printer reported {kind} flags: 0x{flags:08X}",
+                flags = parsed.flags
+            ));
+        } else if let Some(count) = parsed.count.filter(|count| *count > 0) {
+            if count == 1 {
+                out.push(format!("Printer reported 1 {kind}"));
+            } else {
+                out.push(format!("Printer reported {count} {kind}s"));
+            }
+        }
+    };
 
     for line in response.lines() {
         let upper = line.to_uppercase();
         if upper.contains("ERRORS:") {
-            if let Some(flags) = extract_hex_flags(line) {
-                if flags != 0 {
-                    errors.push(format!("Printer reported error flags: 0x{flags:08X}"));
-                }
+            if let Some(parsed) = extract_hqes_flags(line, "ERRORS:") {
+                push_message(&mut errors, "error", &parsed);
             }
         } else if upper.contains("WARNINGS:") {
-            if let Some(flags) = extract_hex_flags(line) {
-                if flags != 0 {
-                    warnings.push(format!("Printer reported warning flags: 0x{flags:08X}"));
-                }
+            if let Some(parsed) = extract_hqes_flags(line, "WARNINGS:") {
+                push_message(&mut warnings, "warning", &parsed);
             }
         }
     }
 
     (errors, warnings)
-}
-
-fn extract_hex_flags(line: &str) -> Option<u32> {
-    line.split_whitespace().rev().find_map(|tok| {
-        let t = tok.trim_start_matches("0x").trim_start_matches("0X");
-        u32::from_str_radix(t, 16).ok()
-    })
 }
 
 #[cfg(test)]
@@ -666,9 +725,118 @@ mod tests {
     }
 
     #[test]
-    fn extract_hex_flags_supports_0x_prefix() {
-        assert_eq!(extract_hex_flags("ERRORS: 0x0000000A"), Some(0xA));
-        assert_eq!(extract_hex_flags("no flags here"), None);
+    fn extract_hqes_flags_supports_0x_prefix() {
+        let parsed = extract_hqes_flags("ERRORS: 0x0000000A", "ERRORS:").unwrap();
+        assert_eq!(parsed.flags, 0xA);
+        assert_eq!(parsed.count, None);
+        assert!(extract_hqes_flags("no flags here", "ERRORS:").is_none());
+        assert!(extract_hqes_flags("ERRORS: invalid 00000000", "ERRORS:").is_none());
+    }
+
+    #[test]
+    fn hqes_count_is_not_reported_as_flags() {
+        let parsed = extract_hqes_flags("ERRORS: 1 00000000 00010000", "ERRORS:").unwrap();
+        assert_eq!(parsed.count, Some(1));
+        assert_eq!(parsed.flags, 0x0001_0000);
+        let (errors, _) =
+            decode_hqes("ERRORS: 1 00000000 00010000\nWARNINGS: 0 00000000 00000000\n");
+        assert_eq!(
+            errors,
+            vec!["Printer reported error flags: 0x00010000".to_string()]
+        );
+
+        let (counted, _) = decode_hqes("ERRORS: 2 00000000 00000000\n");
+        assert_eq!(counted, vec!["Printer reported 2 errors".to_string()]);
+    }
+
+    #[test]
+    fn printer_socket_address_supports_ipv4_and_ipv6() {
+        assert_eq!(
+            printer_socket_addr("192.0.2.10", 9100).unwrap(),
+            "192.0.2.10:9100".parse().unwrap()
+        );
+        assert_eq!(
+            printer_socket_addr("2001:db8::10", 9100).unwrap(),
+            "[2001:db8::10]:9100".parse().unwrap()
+        );
+        assert!(printer_socket_addr("printer.local", 9100).is_err());
+    }
+
+    #[test]
+    fn status_requires_a_complete_valid_hqes_reply() {
+        let printer = mock_printer(9100);
+        let clean = status_from_hqes(&printer, b"ERRORS: 00000000\r\nWARNINGS: 00000000\r\n");
+        assert_eq!(clean.status, "online");
+        let zebra = status_from_hqes(
+            &printer,
+            b"ERRORS: 0 00000000 00000000\r\nWARNINGS: 0 00000000 00000000\r\n",
+        );
+        assert_eq!(zebra.status, "online");
+        assert!(zebra.error_messages.is_empty());
+
+        for reply in [
+            b"".as_slice(),
+            b"garbage",
+            b"ERRORS: invalid\r\nWARNINGS: 0\r\n",
+            b"ERRORS: invalid 00000000\r\nWARNINGS: 0\r\n",
+        ] {
+            let status = status_from_hqes(&printer, reply);
+            assert_eq!(status.status, "offline");
+            assert!(!status.error_messages.is_empty());
+        }
+    }
+
+    struct PartialFailWriter {
+        written: Vec<u8>,
+    }
+
+    impl Write for PartialFailWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if !self.written.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "simulated partial write",
+                ));
+            }
+            let count = buf.len().min(2);
+            self.written.extend_from_slice(&buf[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn partial_write_failure_reports_unknown_delivery_without_retry() {
+        let mut writer = PartialFailWriter {
+            written: Vec::new(),
+        };
+        let error = write_payload(&mut writer, b"label").unwrap_err();
+        assert_eq!(writer.written, b"la");
+        assert!(error.contains("delivery status is unknown"));
+    }
+
+    struct FlushFailWriter;
+
+    impl Write for FlushFailWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "simulated flush failure",
+            ))
+        }
+    }
+
+    #[test]
+    fn flush_failure_reports_unknown_delivery() {
+        let error = write_payload(&mut FlushFailWriter, b"label").unwrap_err();
+        assert!(error.contains("delivery status is unknown"));
     }
 
     #[test]

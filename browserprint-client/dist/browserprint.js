@@ -380,9 +380,9 @@ var C = class {
 		this.darkness = parseFloat(n.DARKNESS), this.printSpeed = parseInt((n["PRINT SPEED"] ?? "").replace("IPS", "").trim(), 10), this.printWidth = parseInt(n["PRINT WIDTH"], 10), this.labelLength = parseInt(n["LABEL LENGTH"], 10), this.firmwareVersion = (n.FIRMWARE ?? "").replace("<-", "").trim(), this.linkOSVersion = Object.prototype.hasOwnProperty.call(n, "LINK-OS VERSION") ? n["LINK-OS VERSION"] : "0";
 	}
 }, E = 5, D = 1e3;
-function O(e, t, n) {
+function O(e, t, n, r) {
 	if (!t && !n) return new Promise((t, n) => e(t, n));
-	e((e) => t?.(e), (e) => n?.(e));
+	e((e) => t?.(e), (e) => s(n, r, e));
 }
 function k(e, t = {}) {
 	let n = t.pollIntervalMs ?? 2e3, r = e.Device;
@@ -439,48 +439,48 @@ function k(e, t = {}) {
 			}, i = (e) => n({ error: e });
 			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, "", r, i) : this.sendThenReadAllAvailable(e.command, r, i);
 		}
-		getStatus(e, t) {
+		getStatus(t, n) {
 			return O((e, t) => {
 				this.enqueue("status", "~hs\r\n", (e) => new C(e)).then((t) => e(t), t);
-			}, e, t);
+			}, t, n, e.defaultErrorCallback);
 		}
-		isPrinterReady(e, t) {
+		isPrinterReady(t, n) {
 			return O((e, t) => {
 				this.getStatus().then((n) => n.isPrinterReady() ? e(n.getMessage()) : t(n.getMessage()), t);
-			}, e, t);
+			}, t, n, e.defaultErrorCallback);
 		}
-		getInfo(e, t) {
+		getInfo(t, n) {
 			return O((e, t) => {
 				this.enqueue("info", "~hi\r\n", (e) => new w(e)).then((t) => e(t), t);
-			}, e, t);
+			}, t, n, e.defaultErrorCallback);
 		}
-		getConfiguration(e, t) {
+		getConfiguration(t, n) {
 			return O((e, t) => {
 				this.enqueue("config", "^XA^HH^XZ", (e) => {
 					let t = new T(e);
 					return this.configuration = t, t;
 				}).then((t) => e(t), t);
-			}, e, t);
+			}, t, n, e.defaultErrorCallback);
 		}
-		getSGD(e, t, n) {
-			return O((t, n) => {
-				this.enqueue("sgd", `! U1 getvar "${e}"\r\n`).then((e) => t(e), n);
-			}, t, n);
+		getSGD(t, n, r) {
+			return O((e, n) => {
+				this.enqueue("sgd", `! U1 getvar "${t}"\r\n`).then((t) => e(t), n);
+			}, n, r, e.defaultErrorCallback);
 		}
-		setSGD(e, t, n, r) {
-			return O((n, r) => {
-				this.enqueue("set", `! U1 setvar "${e}" "${t}"\r\n`).then((e) => n(e), r);
-			}, n, r);
+		setSGD(t, n, r, i) {
+			return O((e, r) => {
+				this.enqueue("set", `! U1 setvar "${t}" "${n}"\r\n`).then((t) => e(t), r);
+			}, r, i, e.defaultErrorCallback);
 		}
-		setThenGetSGD(e, t, n, r) {
-			return O((n, r) => {
-				this.setSGD(e, t).then(() => this.getSGD(e).then(n, r), r);
-			}, n, r);
+		setThenGetSGD(t, n, r, i) {
+			return O((e, r) => {
+				this.setSGD(t, n).then(() => this.getSGD(t).then(e, r), r);
+			}, r, i, e.defaultErrorCallback);
 		}
-		query(e, t, n) {
-			return O((t, n) => {
-				this.enqueue("query", e).then((e) => t(e), n);
-			}, t, n);
+		query(t, n, r) {
+			return O((e, n) => {
+				this.enqueue("query", t).then((t) => e(t), n);
+			}, n, r, e.defaultErrorCallback);
 		}
 		async ensureConfiguration() {
 			return this.configuration ?? await this.getConfiguration();
@@ -497,7 +497,7 @@ function k(e, t = {}) {
 						height: o.labelLength
 					}), e.convert(n, this, s, i, (e) => a(e || "Conversion is not supported by this Browser Print agent"));
 				}, a);
-			}, i, a);
+			}, i, a, e.defaultErrorCallback);
 		}
 		printImageAsLabel(e, t, n, r) {
 			return this.convertWith("print", e, t, n, r);

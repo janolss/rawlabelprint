@@ -21,6 +21,7 @@
  *   accepts a plain `Device`.
  * - Conversion helpers copy the options object instead of mutating the caller's.
  */
+import { invokeError } from "./http";
 import type {
   BrowserPrintAPI,
   ConvertOptions,
@@ -224,15 +225,16 @@ const CONFIG_LOAD_BASE_DELAY_MS = 1000;
  */
 function dual<T>(
   run: (ok: (value: T) => void, fail: (reason: string) => void) => void,
-  success?: SuccessCallback<T>,
-  error?: ErrorCallback
+  success: SuccessCallback<T> | undefined,
+  error: ErrorCallback | undefined,
+  fallbackError: ErrorCallback
 ): Promise<T> | undefined {
   if (!success && !error) {
     return new Promise<T>((resolve, reject) => run(resolve, reject));
   }
   run(
     (value) => success?.(value),
-    (reason) => error?.(reason)
+    (reason) => invokeError(error, fallbackError, reason)
   );
   return undefined;
 }
@@ -413,7 +415,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           );
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -427,7 +430,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           );
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -440,7 +444,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           );
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -457,7 +462,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           }).then((v) => resolve(v as PrinterConfiguration), reject);
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -467,7 +473,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           this.enqueue("sgd", `! U1 getvar "${name}"\r\n`).then((v) => resolve(v as string), reject);
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -485,7 +492,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           );
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -500,7 +508,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           this.setSGD(name, value)!.then(() => this.getSGD(name)!.then(resolve, reject), reject);
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -510,7 +519,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           this.enqueue("query", command).then((v) => resolve(v as string), reject);
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
@@ -539,7 +549,8 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           }, reject);
         },
         ok,
-        fail
+        fail,
+        api.defaultErrorCallback
       );
     }
 
