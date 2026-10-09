@@ -71,13 +71,13 @@ Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` 
 
 ### Drop-in JS client
 
-This repo includes a TypeScript **drop-in** for Zebra `BrowserPrint-3.1.250` under [`browserprint-client/`](browserprint-client/) (same global `BrowserPrint` API, `fetch` + timeouts). Build with `npm run build:browserprint`, then:
+This repo includes an independent TypeScript **drop-in** for Zebra `BrowserPrint-3.1.250` *and* `BrowserPrint-Zebra-1.1.250` under [`browserprint-client/`](browserprint-client/) (globals `BrowserPrint` and `Zebra`, `fetch` + timeouts). One script replaces both Zebra files. Build with `npm run build:browserprint`, then:
 
 ```html
 <script src="browserprint-client/dist/BrowserPrint.min.js"></script>
 ```
 
-Interactive check: open [`test/browserprint.html`](test/browserprint.html) with RawLabelPrint running (Compatible mode on). Prefer this client for new pages; Zebra’s minified SDK remains optional for third-party apps.
+Interactive check: open [`test/browserprint.html`](test/browserprint.html) with RawLabelPrint running (Compatible mode on). 
 
 Disable Compatible mode in Settings if you only want the simple `/` API.
 
@@ -220,7 +220,7 @@ sudo apt install ./src-tauri/target/release/bundle/deb/RawLabelPrint_*.deb
 | `ui/` | Settings UI (Vite + vanilla JS) |
 | `src-tauri/` | Rust: tray, HTTP API, UDP/USB discovery, TCP/USB print |
 | `src-tauri/udev/` | Linux udev rule for Zebra USB (packaged in `.deb`) |
-| `browserprint-client/` | Drop-in BrowserPrint-3.1.250-compatible JS client |
+| `browserprint-client/` | Drop-in JS client replacing BrowserPrint-3.1.250 + BrowserPrint-Zebra-1.1.250 |
 | `test/` | Browser API smoke-test pages |
 | `reference/` | Reference implementations (local only, gitignored) |
 

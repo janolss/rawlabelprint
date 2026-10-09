@@ -62,7 +62,7 @@ function s(e, t, r) {
 	} catch {}
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.151.0/helpers/esm/typeof.js
+//#region \0@oxc-project+runtime@0.152.0/helpers/esm/typeof.js
 function c(e) {
 	"@babel/helpers - typeof";
 	return c = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
@@ -72,7 +72,7 @@ function c(e) {
 	}, c(e);
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.151.0/helpers/esm/toPrimitive.js
+//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPrimitive.js
 function l(e, t) {
 	if (c(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
@@ -84,13 +84,13 @@ function l(e, t) {
 	return (t === "string" ? String : Number)(e);
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.151.0/helpers/esm/toPropertyKey.js
+//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPropertyKey.js
 function u(e) {
 	var t = l(e, "string");
 	return c(t) == "symbol" ? t : t + "";
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.151.0/helpers/esm/defineProperty.js
+//#region \0@oxc-project+runtime@0.152.0/helpers/esm/defineProperty.js
 function d(e, t, n) {
 	return (t = u(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
@@ -315,15 +315,253 @@ function _(e = t()) {
 		}).catch((e) => s(l, n.defaultErrorCallback, e));
 	}, n;
 }
+function v(e) {
+	return e.length > 1 && e.charAt(0) === "" && e.charAt(e.length - 1) === "";
+}
+function y(e) {
+	return typeof e == "string" ? e : e instanceof Error ? e.message : String(e);
+}
+function b(e) {
+	return e.split("").map((e) => e.replace(/^[\s\x02]+/, "").trim()).filter((e) => e.length > 0).map((e) => e.split(",").map((e) => e.trim()));
+}
+function x(e, t) {
+	return e?.[t] === "1";
+}
+function S(e, t) {
+	let n = parseInt(e?.[t] ?? "", 10);
+	return Number.isNaN(n) ? void 0 : n;
+}
+var C = class {
+	constructor(e) {
+		d(this, "raw", void 0), d(this, "offline", !1), d(this, "paperOut", !1), d(this, "paused", !1), d(this, "headOpen", !1), d(this, "ribbonOut", !1), d(this, "labelLengthDots", void 0), d(this, "formatsInBuffer", void 0), d(this, "bufferFull", !1), d(this, "partialFormatInProgress", !1), d(this, "corruptRam", !1), d(this, "underTemperature", !1), d(this, "overTemperature", !1), d(this, "labelsRemaining", void 0), this.raw = e ?? "";
+		let t = this.raw.trim();
+		if (!v(t)) {
+			this.offline = !0;
+			return;
+		}
+		let [n, r] = b(t);
+		this.paperOut = x(n, 1), this.paused = x(n, 2), this.labelLengthDots = S(n, 3), this.formatsInBuffer = S(n, 4), this.bufferFull = x(n, 5), this.partialFormatInProgress = x(n, 7), this.corruptRam = x(n, 9), this.underTemperature = x(n, 10), this.overTemperature = x(n, 11), this.headOpen = x(r, 2), this.ribbonOut = x(r, 3), this.labelsRemaining = S(r, 8);
+	}
+	isFlagSet(e) {
+		return this.raw.charAt(e) === "1";
+	}
+	isPrinterReady() {
+		return !(this.paperOut || this.paused || this.headOpen || this.ribbonOut || this.offline);
+	}
+	getMessage() {
+		return this.isPrinterReady() ? "Ready" : this.offline ? "Offline" : this.paperOut ? "Paper Out" : this.headOpen ? "Head Open" : this.ribbonOut ? "Ribbon Out" : this.paused ? "Paused" : "Ready";
+	}
+}, w = class {
+	constructor(e) {
+		if (d(this, "raw", void 0), d(this, "model", void 0), d(this, "firmware", void 0), d(this, "extra", void 0), !e) throw Error("Invalid Response");
+		this.raw = e;
+		let t = e.trim();
+		if (!v(t)) throw Error("Invalid Response");
+		let n = t.slice(1, -1).split(",");
+		this.model = (n[0] ?? "").trim(), this.firmware = (n[1] ?? "").trim(), this.extra = n.slice(2).map((e) => e.trim());
+	}
+}, T = class {
+	constructor(e) {
+		if (d(this, "raw", void 0), d(this, "settings", {}), d(this, "darkness", void 0), d(this, "printSpeed", void 0), d(this, "printWidth", void 0), d(this, "labelLength", void 0), d(this, "firmwareVersion", void 0), d(this, "linkOSVersion", void 0), !e) throw Error("Invalid Response");
+		let t = e.trim();
+		if (this.raw = t, !v(t)) throw Error("Invalid Response");
+		for (let e of t.replace("", "").replace("", "").split("\n")) {
+			let t = e.trim();
+			if (t === "") continue;
+			let n = t.substring(0, 20).trim(), r = t.substring(20).trim();
+			if (r === "") {
+				let e = /^(.*?)\s{2,}(\S.*)$/.exec(t);
+				if (!e) continue;
+				n = e[1].trim(), r = e[2].trim();
+			}
+			this.settings[r] = n;
+		}
+		let n = this.settings;
+		this.darkness = parseFloat(n.DARKNESS), this.printSpeed = parseInt((n["PRINT SPEED"] ?? "").replace("IPS", "").trim(), 10), this.printWidth = parseInt(n["PRINT WIDTH"], 10), this.labelLength = parseInt(n["LABEL LENGTH"], 10), this.firmwareVersion = (n.FIRMWARE ?? "").replace("<-", "").trim(), this.linkOSVersion = Object.prototype.hasOwnProperty.call(n, "LINK-OS VERSION") ? n["LINK-OS VERSION"] : "0";
+	}
+}, E = 5, D = 1e3;
+function O(e, t, n) {
+	if (!t && !n) return new Promise((t, n) => e(t, n));
+	e((e) => t?.(e), (e) => n?.(e));
+}
+function k(e, t = {}) {
+	let n = t.pollIntervalMs ?? 2e3, r = e.Device;
+	class i extends r {
+		constructor(e, t = {}) {
+			super(e), d(this, "configuration", void 0), d(this, "queue", []), t.autoLoadConfiguration !== !1 && this.loadConfigurationInBackground(1);
+		}
+		loadConfigurationInBackground(e) {
+			this.configuration || this.getConfiguration().catch(() => {
+				e >= E || setTimeout(() => this.loadConfigurationInBackground(e + 1), D * 2 ** (e - 1)).unref?.();
+			});
+		}
+		clearRequestQueue() {
+			let e = this.queue[0]?.started ? this.queue[0] : void 0;
+			for (let t of this.queue) t !== e && t.waiters.forEach((e) => e.reject("Request cancelled"));
+			this.queue = e ? [e] : [];
+		}
+		enqueue(e, t, n) {
+			return new Promise((r, i) => {
+				let a = {
+					resolve: r,
+					reject: i
+				}, o = e === "status" ? this.queue.find((e) => e.kind === "status" && !e.started) : void 0;
+				if (o) {
+					o.waiters.push(a);
+					return;
+				}
+				this.queue.push({
+					kind: e,
+					command: t,
+					parse: n,
+					waiters: [a],
+					started: !1
+				}), this.pump();
+			});
+		}
+		pump() {
+			let e = this.queue[0];
+			if (!e || e.started) return;
+			e.started = !0;
+			let t = !1, n = (n) => {
+				if (t) return;
+				t = !0;
+				let r = this.queue.indexOf(e);
+				r >= 0 && this.queue.splice(r, 1);
+				for (let t of e.waiters) "error" in n ? t.reject(n.error) : t.resolve(n.value);
+				this.pump();
+			}, r = (t) => {
+				try {
+					n({ value: e.parse ? e.parse(t) : t });
+				} catch (e) {
+					n({ error: y(e) });
+				}
+			}, i = (e) => n({ error: e });
+			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, "", r, i) : this.sendThenReadAllAvailable(e.command, r, i);
+		}
+		getStatus(e, t) {
+			return O((e, t) => {
+				this.enqueue("status", "~hs\r\n", (e) => new C(e)).then((t) => e(t), t);
+			}, e, t);
+		}
+		isPrinterReady(e, t) {
+			return O((e, t) => {
+				this.getStatus().then((n) => n.isPrinterReady() ? e(n.getMessage()) : t(n.getMessage()), t);
+			}, e, t);
+		}
+		getInfo(e, t) {
+			return O((e, t) => {
+				this.enqueue("info", "~hi\r\n", (e) => new w(e)).then((t) => e(t), t);
+			}, e, t);
+		}
+		getConfiguration(e, t) {
+			return O((e, t) => {
+				this.enqueue("config", "^XA^HH^XZ", (e) => {
+					let t = new T(e);
+					return this.configuration = t, t;
+				}).then((t) => e(t), t);
+			}, e, t);
+		}
+		getSGD(e, t, n) {
+			return O((t, n) => {
+				this.enqueue("sgd", `! U1 getvar "${e}"\r\n`).then((e) => t(e), n);
+			}, t, n);
+		}
+		setSGD(e, t, n, r) {
+			return O((n, r) => {
+				this.enqueue("set", `! U1 setvar "${e}" "${t}"\r\n`).then((e) => n(e), r);
+			}, n, r);
+		}
+		setThenGetSGD(e, t, n, r) {
+			return O((n, r) => {
+				this.setSGD(e, t).then(() => this.getSGD(e).then(n, r), r);
+			}, n, r);
+		}
+		query(e, t, n) {
+			return O((t, n) => {
+				this.enqueue("query", e).then((e) => t(e), n);
+			}, t, n);
+		}
+		async ensureConfiguration() {
+			return this.configuration ?? await this.getConfiguration();
+		}
+		convertWith(t, n, r, i, a) {
+			return O((i, a) => {
+				this.ensureConfiguration().then((o) => {
+					let s = {
+						...r ?? {},
+						action: t
+					};
+					t === "print" && (s.fitTo = {
+						width: o.printWidth,
+						height: o.labelLength
+					}), e.convert(n, this, s, i, (e) => a(e || "Conversion is not supported by this Browser Print agent"));
+				}, a);
+			}, i, a);
+		}
+		printImageAsLabel(e, t, n, r) {
+			return this.convertWith("print", e, t, n, r);
+		}
+		getConvertedResource(e, t, n, r) {
+			return this.convertWith("return", e, t, n, r);
+		}
+		storeConvertedResource(e, t, n, r) {
+			return this.convertWith("store", e, t, n, r);
+		}
+	}
+	d(i, "Status", C), d(i, "Info", w), d(i, "Configuration", T);
+	let a = /* @__PURE__ */ new Map(), o;
+	function s(e) {
+		return e.uid ?? `${e.name ?? ""}|${e.connection ?? ""}`;
+	}
+	function c(e, t, n) {
+		if (a.get(t) !== e) return;
+		if (n.offline) {
+			if (e.errors += 1, e.errors < e.errorsForOffline) return;
+		} else e.errors = 0;
+		let r = e.previous;
+		if (e.previous = n, r === "" || r.raw !== n.raw || r.offline !== n.offline) try {
+			e.onchange(r, n);
+		} catch {}
+	}
+	function l() {
+		for (let [e, t] of a) t.inFlight || (t.inFlight = !0, t.printer.getStatus().then((n) => {
+			t.inFlight = !1, c(t, e, n);
+		}, () => {
+			t.inFlight = !1, c(t, e, new C(""));
+		}));
+	}
+	return {
+		Printer: i,
+		watch(e, t, r = 2) {
+			let c = e instanceof i ? e : new i(e, { autoLoadConfiguration: !1 });
+			a.set(s(e), {
+				printer: c,
+				previous: "",
+				onchange: t,
+				errors: 0,
+				errorsForOffline: r,
+				inFlight: !1
+			}), o === void 0 && (o = setInterval(l, n), o.unref?.());
+		},
+		stopWatching(e) {
+			a.delete(s(e)), a.size === 0 && o !== void 0 && (clearInterval(o), o = void 0);
+		}
+	};
+}
 //#endregion
 //#region src/index.ts
-var v = _();
-Object.assign(v, {
+var A = _(), j = k(A);
+if (Object.assign(A, {
 	createBrowserPrint: _,
 	DEFAULT_TIMEOUT_MS: e,
-	resolveBaseUrl: t
-}), typeof globalThis < "u" && (globalThis.BrowserPrint = v);
+	resolveBaseUrl: t,
+	Zebra: j
+}), typeof globalThis < "u") {
+	let e = globalThis;
+	e.BrowserPrint = A, e.Zebra = j;
+}
 //#endregion
-export { v as default };
+export { A as default };
 
 //# sourceMappingURL=browserprint.js.map
