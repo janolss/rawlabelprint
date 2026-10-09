@@ -49,7 +49,7 @@ jobs:
           tool: cargo-audit
 
       - name: Cargo audit
-        run: cargo audit --manifest-path src-tauri/Cargo.toml
+        run: cargo audit --file src-tauri/Cargo.lock
 
       - run: npm test
 
