@@ -62,7 +62,7 @@ function s(e, t, r) {
 	} catch {}
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/typeof.js
+//#region \0@oxc-project+runtime@0.153.0/helpers/esm/typeof.js
 function c(e) {
 	"@babel/helpers - typeof";
 	return c = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
@@ -72,7 +72,7 @@ function c(e) {
 	}, c(e);
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPrimitive.js
+//#region \0@oxc-project+runtime@0.153.0/helpers/esm/toPrimitive.js
 function l(e, t) {
 	if (c(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
@@ -84,13 +84,13 @@ function l(e, t) {
 	return (t === "string" ? String : Number)(e);
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPropertyKey.js
+//#region \0@oxc-project+runtime@0.153.0/helpers/esm/toPropertyKey.js
 function u(e) {
 	var t = l(e, "string");
 	return c(t) == "symbol" ? t : t + "";
 }
 //#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/defineProperty.js
+//#region \0@oxc-project+runtime@0.153.0/helpers/esm/defineProperty.js
 function d(e, t, n) {
 	return (t = u(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
@@ -239,11 +239,7 @@ function _(e = t()) {
 		}).catch((e) => s(c, n.defaultErrorCallback, e));
 	}, n.getApplicationConfiguration = (t, i) => {
 		r(`${e}config`, { method: "GET" }).then((e) => {
-			if (e === "") {
-				o(t, null);
-				return;
-			}
-			o(t, a(e));
+			e === "" ? o(t, null) : o(t, a(e));
 		}).catch((e) => s(i, n.defaultErrorCallback, e));
 	}, n.readOnInterval = (e, t, r) => {
 		let i = r;
@@ -406,17 +402,13 @@ function k(e, t = {}) {
 					resolve: r,
 					reject: i
 				}, o = e === "status" ? this.queue.find((e) => e.kind === "status" && !e.started) : void 0;
-				if (o) {
-					o.waiters.push(a);
-					return;
-				}
-				this.queue.push({
+				o ? o.waiters.push(a) : (this.queue.push({
 					kind: e,
 					command: t,
 					parse: n,
 					waiters: [a],
 					started: !1
-				}), this.pump();
+				}), this.pump());
 			});
 		}
 		pump() {

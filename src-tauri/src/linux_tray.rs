@@ -212,12 +212,11 @@ mod tests {
     fn white_template_keeps_alpha() {
         let source = Image::from_bytes(TRAY_PNG).unwrap();
         let mut rgba = source.rgba().to_vec();
-        assert!(
-            rgba.as_chunks::<4>()
-                .0
-                .iter()
-                .any(|px| px[3] > 0 && px[0] < 32)
-        );
+        assert!(rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px[3] > 0 && px[0] < 32));
         paint_template_white(&mut rgba);
         for px in rgba.as_chunks::<4>().0 {
             if px[3] != 0 {
