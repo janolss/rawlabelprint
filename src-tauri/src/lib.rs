@@ -1,6 +1,8 @@
 mod config;
 mod discovery;
 mod http_server;
+#[cfg(target_os = "linux")]
+mod linux_tray;
 #[cfg(target_os = "macos")]
 mod local_network;
 mod print;
@@ -437,7 +439,11 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &quit_i])?;
 
             let tray_tooltip = format!("RawLabelPrint {}", env!("CARGO_PKG_VERSION"));
-            // Black + alpha only. macOS treats this as a template and tints it.
+            // Black + alpha template. macOS tints it. Linux draws the pixmap as-is,
+            // so a dark panel needs the same shape in white.
+            #[cfg(target_os = "linux")]
+            let tray_icon = linux_tray::icon(linux_tray::prefers_dark_ui())?;
+            #[cfg(not(target_os = "linux"))]
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
             let tray = TrayIconBuilder::new()
                 .icon(tray_icon)
@@ -461,7 +467,11 @@ pub fn run() {
             // Template icons are a macOS menu-bar convention; on Linux they often render blank/grey.
             #[cfg(target_os = "macos")]
             let tray = tray.icon_as_template(true);
-            let _tray = tray.build(app)?;
+            let built = tray.build(app)?;
+            #[cfg(target_os = "linux")]
+            linux_tray::follow_color_scheme(built);
+            #[cfg(not(target_os = "linux"))]
+            let _ = built;
 
             // Close settings to tray instead of quitting
             if let Some(window) = app.get_webview_window("settings") {
