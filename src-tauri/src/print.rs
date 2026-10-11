@@ -344,6 +344,11 @@ fn format_usb_open_error(path: &str, err: &serialport::Error) -> String {
             );
         }
     }
+    if cfg!(target_os = "windows") {
+        return format!(
+            "{base}. On Windows the printer must use the Zebra CDC/COM driver, and the COM port must not be in use by another program"
+        );
+    }
     base
 }
 

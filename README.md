@@ -1,6 +1,6 @@
 # RawLabelPrint
 
-macOS (Apple Silicon) and Linux (Pop!_OS / Ubuntu 24.04+) tray app for browser-based raw label printing.
+macOS (Apple Silicon), Linux (Pop!_OS / Ubuntu 24.04+) and Windows 10/11 tray app for browser-based raw label printing.
 
 The app:
 
@@ -73,7 +73,7 @@ Device `uid` is the printer serial when known, otherwise `net:<ip>:<printPort>` 
 - **JSON** (from `device.send`): `{ "device": { "uid", … }, "data": "^XA…" }`
 - **multipart/form-data** (from `device.sendFile`): field `json` = `{ "device": { … } }`, field `blob` = raw bytes (ZPL/PDF/…)
 
-Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send` / `device.sendFile`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on Apple Silicon or Linux machines and official Browser Print elsewhere.
+Web apps that already use Zebra’s JS library (`BrowserPrint.getDefaultDevice` / `getLocalDevices` / `device.send` / `device.sendFile`) can keep pointing at `http://127.0.0.1:9100/` without code changes — use RawLabelPrint on macOS (Apple Silicon), Linux, or Windows machines and official Browser Print elsewhere.
 
 ### Drop-in JS client
 
@@ -97,7 +97,7 @@ Disable Compatible mode in Settings if you only want the simple `/` API.
 6. Keep **Compatible mode** on for BrowserPrint.js clients.
 7. Optional: enable **Launch at login**.
 
-### USB printers (macOS & Linux)
+### USB printers (macOS, Linux & Windows)
 
 USB support targets Zebra printers that appear as a **CDC/ACM serial** device (not CUPS queues, not bare `usblp`-only devices).
 
@@ -116,6 +116,8 @@ If open still fails with permission denied, ensure the rule is present or add yo
 
 **macOS:** CDC devices usually appear under `/dev/cu.usbmodem…` with no extra setup.
 
+**Windows:** only printers exposed as a COM port are found, which requires the Zebra CDC/COM driver (the default `usbprint` driver is not supported yet; use network printing or install the CDC driver). The port must not be open in another program.
+
 ### macOS Local Network
 
 On macOS 15+, allow **RawLabelPrint** under **System Settings → Privacy & Security → Local Network**.  
@@ -127,10 +129,15 @@ UDP discovery can succeed while TCP `:9100` still fails with `No route to host (
 
 Pop!_OS typically includes AppIndicator support. On plain GNOME without an AppIndicator extension, the tray icon may be missing — the app still runs and can be opened from the application menu (desktop entry).
 
+### Windows tray and firewall
+
+The tray icon may be hidden in the taskbar overflow area (^); drag it out to keep it visible. On first run, allow RawLabelPrint through Windows Defender Firewall (private networks) so UDP discovery on port 4201 works.
+
 ### Config location
 
 - **macOS:** `~/Library/Application Support/se.rawlabelprint.desktop/config.json`
 - **Linux:** `~/.local/share/se.rawlabelprint.desktop/config.json`
+- **Windows:** `%APPDATA%\se.rawlabelprint.desktop\config.json`
 
 ## Develop
 
@@ -161,6 +168,15 @@ sudo apt-get install -y \
 ```
 
 ```bash
+npm install
+npm run tauri dev
+```
+
+### Windows
+
+Prerequisites: Node.js 20+, Rust (stable, MSVC toolchain), Visual Studio Build Tools (C++ workload) and WebView2 (included in Windows 11).
+
+```powershell
 npm install
 npm run tauri dev
 ```
@@ -218,6 +234,15 @@ Install:
 ```bash
 sudo apt install ./src-tauri/target/release/bundle/deb/RawLabelPrint_*.deb
 ```
+
+### NSIS installer for Windows
+
+```powershell
+npm install
+npm run tauri build -- --bundles nsis
+```
+
+Artifact: `src-tauri/target/release/bundle/nsis/RawLabelPrint_*-setup.exe` (per-user install). The installer is unsigned, so SmartScreen shows a warning until it is code-signed.
 
 ## Project layout
 

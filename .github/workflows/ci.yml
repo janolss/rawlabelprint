@@ -96,3 +96,37 @@ jobs:
           name: RawLabelPrint-linux-deb
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
+
+  windows-nsis:
+    name: Test and build Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1"
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build NSIS installer
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: RawLabelPrint-windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

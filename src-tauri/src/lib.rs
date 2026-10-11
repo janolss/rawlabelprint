@@ -443,8 +443,12 @@ pub fn run() {
             // so a dark panel needs the same shape in white.
             #[cfg(target_os = "linux")]
             let tray_icon = linux_tray::icon(linux_tray::prefers_dark_ui())?;
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(target_os = "macos")]
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+            // Windows has no template icons; the black template would vanish on a dark
+            // taskbar, so use the full-color app icon.
+            #[cfg(target_os = "windows")]
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
             let tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .menu(&menu)
