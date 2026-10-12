@@ -6,7 +6,10 @@ use crate::http_server::origin::{ensure_origin_allowed, session_origin};
 use crate::http_server::resolve::{
     collect_known_printers, resolve_by_device_ref, BrowserDeviceRef,
 };
-use crate::http_server::response::{empty_ok, json_err, json_ok, public_print_error, text_ok};
+use crate::http_server::response::{
+    empty_ok, json_err, json_err_code, json_ok, public_print_error, text_ok, COMPAT_DISABLED,
+    DEVICE_NOT_FOUND, ORIGIN_DENIED, PRINTER_UNREACHABLE,
+};
 use crate::http_server::HttpSharedState;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -53,8 +56,9 @@ async fn require_compatible(state: &HttpSharedState) -> Result<(), Response> {
     if compatible_enabled(state).await {
         Ok(())
     } else {
-        Err(json_err(
+        Err(json_err_code(
             StatusCode::NOT_FOUND,
+            COMPAT_DISABLED,
             "Browser Print compatible mode is disabled. Enable it in Settings.",
         ))
     }
@@ -77,7 +81,7 @@ pub(crate) async fn handle_available(
         return resp;
     }
     if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err(status, msg);
+        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     let printers = collect_known_printers(&state).await;
@@ -113,7 +117,7 @@ pub(crate) async fn handle_default(
         return resp;
     }
     if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err(status, msg);
+        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     // BrowserPrint.js treats empty body as null default device.
@@ -159,7 +163,7 @@ pub(crate) async fn handle_write(
         return resp;
     }
     if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err(status, msg);
+        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     let parsed = match parse_write_request(&headers, &body) {
@@ -168,7 +172,7 @@ pub(crate) async fn handle_write(
     };
 
     let Some(printer) = resolve_by_device_ref(&state, &parsed.device).await else {
-        return json_err(StatusCode::NOT_FOUND, "Device not found");
+        return json_err_code(StatusCode::NOT_FOUND, DEVICE_NOT_FOUND, "Device not found");
     };
 
     let data = if !parsed.data.is_empty() {
@@ -207,9 +211,14 @@ pub(crate) async fn handle_write(
 
     match result {
         Ok(Ok(())) => json_ok("{}".into()),
-        Ok(Err(e)) => json_err(StatusCode::INTERNAL_SERVER_ERROR, public_print_error(&e)),
-        Err(e) => json_err(
+        Ok(Err(e)) => json_err_code(
             StatusCode::INTERNAL_SERVER_ERROR,
+            PRINTER_UNREACHABLE,
+            public_print_error(&e),
+        ),
+        Err(e) => json_err_code(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            PRINTER_UNREACHABLE,
             public_print_error(&e.to_string()),
         ),
     }
@@ -274,7 +283,7 @@ async fn handle_convert_inner(
 
     if action.eq_ignore_ascii_case("print") && looks_raw {
         if let Err((status, msg)) = ensure_origin_allowed(state, headers).await {
-            return Ok(json_err(status, msg));
+            return Ok(json_err_code(status, ORIGIN_DENIED, msg));
         }
         let device = meta
             .device
@@ -307,8 +316,9 @@ async fn handle_convert_inner(
             .record_print("/convert", &printer, &blob, result.clone())
             .await;
         if let Err(err) = result {
-            return Ok(json_err(
+            return Ok(json_err_code(
                 StatusCode::INTERNAL_SERVER_ERROR,
+                PRINTER_UNREACHABLE,
                 public_print_error(&err),
             ));
         }
@@ -344,7 +354,7 @@ pub(crate) async fn handle_read(
         return resp;
     }
     if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err(status, msg);
+        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     let parsed: ReadBody = match serde_json::from_slice(&body) {
@@ -353,7 +363,7 @@ pub(crate) async fn handle_read(
     };
 
     let Some(printer) = resolve_by_device_ref(&state, &parsed.device).await else {
-        return json_err(StatusCode::NOT_FOUND, "Device not found");
+        return json_err_code(StatusCode::NOT_FOUND, DEVICE_NOT_FOUND, "Device not found");
     };
 
     let permit = match state.device_io.clone().try_acquire_owned() {
@@ -373,9 +383,14 @@ pub(crate) async fn handle_read(
 
     match result {
         Ok(Ok(text)) => text_ok(text),
-        Ok(Err(e)) => json_err(StatusCode::INTERNAL_SERVER_ERROR, public_print_error(&e)),
-        Err(e) => json_err(
+        Ok(Err(e)) => json_err_code(
             StatusCode::INTERNAL_SERVER_ERROR,
+            PRINTER_UNREACHABLE,
+            public_print_error(&e),
+        ),
+        Err(e) => json_err_code(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            PRINTER_UNREACHABLE,
             public_print_error(&e.to_string()),
         ),
     }
@@ -638,5 +653,73 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
         .await;
         let (parts, _) = response.into_response().into_parts();
         assert_eq!(parts.status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn compatible_off_keeps_message_and_adds_code() {
+        let state = test_state(false, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/available")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_json(response).await;
+        assert_eq!(
+            body["error"],
+            "Browser Print compatible mode is disabled. Enable it in Settings."
+        );
+        assert_eq!(body["code"], "COMPAT_DISABLED");
+    }
+
+    #[tokio::test]
+    async fn write_unknown_device_keeps_message_and_adds_code() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/write")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"device":{"uid":"missing"},"data":"^XA^XZ"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_json(response).await;
+        assert_eq!(body["error"], "Device not found");
+        assert_eq!(body["code"], "DEVICE_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn available_unapproved_origin_adds_origin_denied_code() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/available")
+                    .header(header::ORIGIN, "https://new.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = body_json(response).await;
+        assert_eq!(
+            body["error"],
+            "Website not approved for printing (https://new.example). Open RawLabelPrint Settings to allow it, then try again."
+        );
+        assert_eq!(body["code"], "ORIGIN_DENIED");
     }
 }

@@ -1,6 +1,8 @@
 use crate::http_server::origin::ensure_origin_allowed;
 use crate::http_server::resolve::{list_printers_json, resolve_printer};
-use crate::http_server::response::{json_ok, public_print_error};
+use crate::http_server::response::{
+    error_json, json_ok, public_print_error, DEVICE_NOT_FOUND, ORIGIN_DENIED, PRINTER_UNREACHABLE,
+};
 use crate::http_server::HttpSharedState;
 use crate::print::send_raw_to_printer;
 use axum::body::Bytes;
@@ -73,7 +75,7 @@ async fn handle_get(
 
     if printer_name.is_empty() && print_data.is_empty() {
         if let Err((status, msg)) = ensure_origin_allowed(state, headers).await {
-            return Err((status, json!({ "error": msg }).to_string()));
+            return Err((status, error_json(msg, Some(ORIGIN_DENIED))));
         }
         return Ok(list_printers_json(state).await);
     }
@@ -112,13 +114,13 @@ pub(crate) async fn do_print(
     }
 
     if let Err((status, msg)) = ensure_origin_allowed(state, headers).await {
-        return Err((status, json!({ "error": msg }).to_string()));
+        return Err((status, error_json(msg, Some(ORIGIN_DENIED))));
     }
 
     let printer = resolve_printer(state, printer_name).await.ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
-            json!({ "error": "PRINTER NOT FOUND" }).to_string(),
+            error_json("PRINTER NOT FOUND", Some(DEVICE_NOT_FOUND)),
         )
     })?;
 
@@ -138,7 +140,10 @@ pub(crate) async fn do_print(
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": public_print_error(&e.to_string()) }).to_string(),
+            error_json(
+                public_print_error(&e.to_string()),
+                Some(PRINTER_UNREACHABLE),
+            ),
         )
     })?;
     state
@@ -147,7 +152,7 @@ pub(crate) async fn do_print(
     result.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": public_print_error(&e) }).to_string(),
+            error_json(public_print_error(&e), Some(PRINTER_UNREACHABLE)),
         )
     })?;
 
@@ -268,5 +273,67 @@ mod tests {
         let err = do_print(&state, &headers, "", "^XA^XZ").await.unwrap_err();
         assert_eq!(err.0, StatusCode::FORBIDDEN);
         assert!(state.pending_origins.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unknown_printer_keeps_message_and_adds_device_not_found_code() {
+        let state = state_with_printer(lan_printer("127.0.0.1", 9100), true).await;
+        let err = do_print(&state, &HeaderMap::new(), "missing", "^XA^XZ")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = serde_json::from_str(&err.1).unwrap();
+        assert_eq!(body["error"], "PRINTER NOT FOUND");
+        assert_eq!(body["code"], "DEVICE_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn unapproved_origin_keeps_message_and_adds_origin_denied_code() {
+        let state = state_with_printer(lan_printer("127.0.0.1", 9100), true).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            axum::http::HeaderValue::from_static("https://evil.test"),
+        );
+        let err = do_print(&state, &headers, "", "^XA^XZ").await.unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        let body: serde_json::Value = serde_json::from_str(&err.1).unwrap();
+        assert_eq!(
+            body["error"],
+            "Website not approved for printing (https://evil.test). Open RawLabelPrint Settings to allow it, then try again."
+        );
+        assert_eq!(body["code"], "ORIGIN_DENIED");
+    }
+
+    #[tokio::test]
+    async fn unreachable_printer_keeps_message_and_adds_code() {
+        let state = state_with_printer(lan_printer("127.0.0.1", 1), true).await;
+        let err = do_print(&state, &HeaderMap::new(), "", "^XA^XZ")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+        let body: serde_json::Value = serde_json::from_str(&err.1).unwrap();
+        assert_eq!(body["error"], "Could not reach the printer");
+        assert_eq!(body["code"], "PRINTER_UNREACHABLE");
+    }
+
+    #[tokio::test]
+    async fn method_not_allowed_has_no_error_code() {
+        let state = test_state(true, None);
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        let body = body_json(response).await;
+        assert_eq!(body["error"], "Method not allowed");
+        assert!(body.get("code").is_none());
     }
 }
