@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>First label — simple API</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    input, textarea, button { width: 100%; margin: 0.35rem 0 0.8rem; padding: 0.5rem; font: inherit; box-sizing: border-box; }
+    button { cursor: pointer; }
+    .error { color: #b3261e; }
+    pre { background: #f4f4f5; padding: 0.75rem; overflow: auto; white-space: pre-wrap; }
+    code { font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <h1>First label</h1>
+  <p>Simple API (<code>POST /</code>).</p>
+  <ol>
+    <li>Launch RawLabelPrint (menu bar / system tray icon).</li>
+    <li>Search or add the printer and save it. A search result is not printable until it is saved.</li>
+    <li>
+      Serve this repo from the root and open this page. A <code>file://</code> URL still needs approval and is easy to miss.
+      <pre>python3 -m http.server 8080</pre>
+      Then open <code>http://127.0.0.1:8080/test/quickstart-simple.html</code>.
+    </li>
+    <li>The first request appears under <strong>Allowed websites</strong>. Approve <code>http://127.0.0.1:8080</code> and send again.</li>
+  </ol>
+
+  <label for="address">Base URL</label>
+  <input id="address" value="http://127.0.0.1:9100" />
+
+  <label for="printer">Printer name</label>
+  <input id="printer" placeholder="Leave empty to use the default printer" />
+
+  <label for="data">ZPL</label>
+  <textarea id="data" rows="6">^XA^FO50,50^A0N,40,40^FDHello^FS^XZ</textarea>
+  <button type="button" id="send">Send POST</button>
+
+  <p id="status"></p>
+  <pre id="result"></pre>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+
+    document.getElementById("send").addEventListener("click", async () => {
+      const address = document.getElementById("address").value.trim().replace(/\/$/, "");
+      const printer = document.getElementById("printer").value;
+      const data = document.getElementById("data").value;
+      statusEl.textContent = "";
+      statusEl.className = "";
+      resultEl.textContent = "";
+      try {
+        const response = await fetch(address + "/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ printer, data }),
+        });
+        const text = await response.text();
+        statusEl.textContent = response.ok ? "Sent" : "Error " + response.status;
+        statusEl.className = response.ok ? "" : "error";
+        resultEl.textContent = text;
+      } catch (err) {
+        statusEl.textContent = "Error";
+        statusEl.className = "error";
+        resultEl.textContent = String(err);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -11,6 +11,21 @@ The app:
 - Sends raw data (**ZPL/EPL/…**) **directly** over TCP `:9100` (network) or USB serial — not via CUPS
 - Optional **Compatible mode**: same HTTP surface as Zebra Browser Print so existing `BrowserPrint.js` pages work as a drop-in in mixed environments
 
+## First label
+
+1. Launch RawLabelPrint (menu bar / system tray icon).
+2. Search or add the printer and save it. A search result is not printable until it is saved.
+3. Serve this repo and open the page (a `file://` URL still needs approval and is easy to miss):
+
+```bash
+python3 -m http.server 8080
+```
+
+- Simple API: [test/quickstart-simple.html](test/quickstart-simple.html) → `http://127.0.0.1:8080/test/quickstart-simple.html`
+- BrowserPrint (Compatible mode on; build the client first with `npm run build:browserprint` if `browserprint-client/dist/` is missing): [test/quickstart-browserprint.html](test/quickstart-browserprint.html) → `http://127.0.0.1:8080/test/quickstart-browserprint.html`
+
+4. Approve `http://127.0.0.1:8080` under **Allowed websites**, then send again.
+
 ## Quick start (simple API)
 
 List printers (GET):

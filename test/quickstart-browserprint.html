@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>First label — BrowserPrint</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    textarea, button { width: 100%; margin: 0.35rem 0 0.8rem; padding: 0.5rem; font: inherit; box-sizing: border-box; }
+    button { cursor: pointer; }
+    .error { color: #b3261e; }
+    pre { background: #f4f4f5; padding: 0.75rem; overflow: auto; white-space: pre-wrap; }
+    code { font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <h1>First label</h1>
+  <p>BrowserPrint drop-in. Turn <strong>Compatible mode</strong> on in Settings. If this page says the script is missing, run <code>npm run build:browserprint</code> and reload.</p>
+  <ol>
+    <li>Launch RawLabelPrint (menu bar / system tray icon).</li>
+    <li>Search or add the printer, save it, and set it as the default. A search result is not printable until it is saved.</li>
+    <li>
+      Serve this repo from the root and open this page. A <code>file://</code> URL still needs approval and is easy to miss.
+      <pre>python3 -m http.server 8080</pre>
+      Then open <code>http://127.0.0.1:8080/test/quickstart-browserprint.html</code>.
+    </li>
+    <li>The first request appears under <strong>Allowed websites</strong>. Approve <code>http://127.0.0.1:8080</code> and send again.</li>
+  </ol>
+
+  <label for="data">ZPL</label>
+  <textarea id="data" rows="6">^XA^FO50,50^A0N,40,40^FDHello^FS^XZ</textarea>
+  <button type="button" id="send">Send to default printer</button>
+
+  <p id="status"></p>
+  <pre id="result"></pre>
+
+  <script src="../browserprint-client/dist/BrowserPrint.min.js"></script>
+  <script>
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+
+    function show(label, value, failed) {
+      statusEl.textContent = label;
+      statusEl.className = failed ? "error" : "";
+      resultEl.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    document.getElementById("send").addEventListener("click", () => {
+      if (typeof BrowserPrint === "undefined") {
+        show("Error", "BrowserPrint script missing. Run npm run build:browserprint and reload.", true);
+        return;
+      }
+      const data = document.getElementById("data").value;
+      statusEl.textContent = "Sending…";
+      statusEl.className = "";
+      resultEl.textContent = "";
+      BrowserPrint.getDefaultDevice(
+        "printer",
+        function (device) {
+          if (!device) {
+            show("Error", "No default printer. Save one in Settings and set it as default.", true);
+            return;
+          }
+          device.send(
+            data,
+            function () {
+              show("Sent", device.name || device.uid || "default printer", false);
+            },
+            function (err) {
+              show("Error", err, true);
+            }
+          );
+        },
+        function (err) {
+          show("Error", err, true);
+        }
+      );
+    });
+  </script>
+</body>
+</html>
