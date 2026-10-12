@@ -146,6 +146,45 @@ async fn add_manual_printer(
         print_port: if print_port == 0 { 9100 } else { print_port },
         config_port: 80,
         connection: Connection::Network,
+        capture_path: None,
+    };
+    {
+        let mut cfg = state.config.write().await;
+        cfg.upsert_printer(printer, true);
+    }
+    state.persist().await?;
+    Ok(state.config.read().await.clone())
+}
+
+#[tauri::command]
+async fn add_virtual_printer(
+    state: tauri::State<'_, Arc<AppState>>,
+    name: String,
+    capture_path: Option<String>,
+) -> Result<AppConfig, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Name is required".into());
+    }
+    let capture_path = capture_path.and_then(|path| {
+        let trimmed = path.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+    let printer = PrinterInfo {
+        name: Some(name.to_string()),
+        model: String::new(),
+        firmware: String::new(),
+        serial_number: String::new(),
+        address: name.to_string(),
+        port: 0,
+        print_port: 0,
+        config_port: 0,
+        connection: Connection::Virtual,
+        capture_path,
     };
     {
         let mut cfg = state.config.write().await;
@@ -162,6 +201,7 @@ async fn update_printer(
     name: String,
     address: String,
     print_port: u16,
+    capture_path: Option<String>,
 ) -> Result<AppConfig, String> {
     {
         let mut cfg = state.config.write().await;
@@ -174,6 +214,7 @@ async fn update_printer(
             },
             address,
             print_port,
+            capture_path,
         )?;
     }
     state.persist().await?;
@@ -497,6 +538,7 @@ pub fn run() {
             discover_printers,
             set_default_printer,
             add_manual_printer,
+            add_virtual_printer,
             update_printer,
             remove_added_printer,
             check_printer_status,

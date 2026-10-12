@@ -61,6 +61,20 @@
                 <input id="manualPort" type="number" min="1" max="65535" value="9100" />
               </div>
               <button type="button" id="addManualBtn">Add &amp; set as default</button>
+              <h3 class="block-subtitle">Virtual printer</h3>
+              <p class="hint">
+                Accepts jobs with no device. An optional capture file is appended on each print.
+                Recent prints lists these jobs even when debug logging is off.
+              </p>
+              <div class="row">
+                <label for="virtualName">Name</label>
+                <input id="virtualName" type="text" placeholder="Preview" />
+              </div>
+              <div class="row">
+                <label for="virtualCapturePath">Capture file</label>
+                <input id="virtualCapturePath" type="text" placeholder="Optional path" />
+              </div>
+              <button type="button" id="addVirtualBtn">Add virtual printer</button>
             </section>
 
             <section class="block">

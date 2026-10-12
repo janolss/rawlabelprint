@@ -211,6 +211,7 @@ mod tests {
             print_port: 9100,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         }
     }
 

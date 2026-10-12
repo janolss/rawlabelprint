@@ -22,6 +22,7 @@ pub(crate) fn sample_printer(address: &str, serial: &str) -> PrinterInfo {
         print_port: 9100,
         config_port: 80,
         connection: Connection::Network,
+        capture_path: None,
     }
 }
 
@@ -36,6 +37,7 @@ pub(crate) fn lan_printer(address: &str, print_port: u16) -> PrinterInfo {
         print_port,
         config_port: 80,
         connection: Connection::Network,
+        capture_path: None,
     }
 }
 

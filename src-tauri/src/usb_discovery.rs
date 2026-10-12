@@ -21,6 +21,7 @@ fn from_usb_port(port_name: String, info: UsbPortInfo) -> PrinterInfo {
         print_port: 0,
         config_port: 0,
         connection: Connection::Usb,
+        capture_path: None,
     }
 }
 
@@ -111,6 +112,7 @@ mod tests {
             print_port: 9100,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         }
     }
 
@@ -125,6 +127,7 @@ mod tests {
             print_port: 0,
             config_port: 0,
             connection: Connection::Usb,
+            capture_path: None,
         }
     }
 

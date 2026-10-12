@@ -9,8 +9,10 @@ export interface PrinterInfo {
   port?: number;
   printPort: number;
   configPort: number;
-  /** `"network"` (TCP) or `"usb"` (CDC/serial). Defaults to network. */
+  /** `"network"` (TCP), `"usb"` (CDC/serial), or `"virtual"`. Defaults to network. */
   connection?: string;
+  /** Append-only capture file for a virtual printer. */
+  capturePath?: string | null;
 }
 
 export interface AppConfig {

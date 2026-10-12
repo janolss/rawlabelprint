@@ -1,3 +1,4 @@
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -9,12 +10,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MAX_DENIED_ORIGINS: usize = 128;
 static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Connection {
     #[default]
     Network,
     Usb,
+    Virtual,
 }
 
 impl Connection {
@@ -22,7 +24,23 @@ impl Connection {
         match self {
             Self::Network => "network",
             Self::Usb => "usb",
+            Self::Virtual => "virtual",
         }
+    }
+
+    pub fn is_virtual(self) -> bool {
+        self == Self::Virtual
+    }
+}
+
+impl<'de> Deserialize<'de> for Connection {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.to_ascii_lowercase().as_str() {
+            "usb" => Self::Usb,
+            "virtual" => Self::Virtual,
+            _ => Self::Network,
+        })
     }
 }
 
@@ -46,9 +64,12 @@ pub struct PrinterInfo {
     pub print_port: u16,
     #[serde(default = "default_config_port")]
     pub config_port: u16,
-    /// `"network"` (TCP RAW) or `"usb"` (CDC/serial).
+    /// `"network"` (TCP RAW), `"usb"` (CDC/serial), or `"virtual"` (no device).
     #[serde(default)]
     pub connection: Connection,
+    /// Append-only file for virtual printers. Empty or missing means no file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_path: Option<String>,
 }
 
 fn default_print_port() -> u16 {
@@ -62,6 +83,10 @@ fn default_config_port() -> u16 {
 impl PrinterInfo {
     pub fn is_usb(&self) -> bool {
         self.connection == Connection::Usb
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        self.connection.is_virtual()
     }
 
     pub fn browser_print_connection(&self) -> &'static str {
@@ -111,6 +136,9 @@ impl PrinterInfo {
         }
         if self.is_usb() {
             return format!("usb:{}", self.address);
+        }
+        if self.is_virtual() {
+            return format!("virtual:{}", self.address);
         }
         format!("net:{}:{}", self.address, self.print_port)
     }
@@ -319,20 +347,26 @@ impl AppConfig {
         name: Option<String>,
         address: String,
         print_port: u16,
+        capture_path: Option<String>,
     ) -> Result<(), String> {
-        let address = address.trim().to_string();
-        if address.is_empty() {
-            return Err("Address is required".into());
-        }
-        let address = if self
+        let existing = self
             .added_printers
             .iter()
             .find(|p| p.address == original_address)
-            .is_some_and(|p| p.is_usb())
-        {
-            address
+            .cloned()
+            .ok_or_else(|| "Printer not found".to_string())?;
+        let address = if existing.is_virtual() {
+            original_address.to_string()
         } else {
-            parse_ip_address(&address)?
+            let address = address.trim().to_string();
+            if address.is_empty() {
+                return Err("Address is required".into());
+            }
+            if existing.is_usb() {
+                address
+            } else {
+                parse_ip_address(&address)?
+            }
         };
         if address != original_address && self.added_printers.iter().any(|p| p.address == address) {
             return Err(format!("A printer with address {address} already exists"));
@@ -347,12 +381,22 @@ impl AppConfig {
         let mut printer = self.added_printers[idx].clone();
         printer.name = name.filter(|n| !n.trim().is_empty());
         printer.address = address.clone();
-        if printer.is_usb() {
-            // USB uses CDC path in `address`; print_port stays unused (0).
+        if printer.is_usb() || printer.is_virtual() {
+            // USB uses a device path in `address`. Virtual printers have no port.
             printer.print_port = 0;
             printer.config_port = 0;
         } else {
             printer.print_port = if print_port == 0 { 9100 } else { print_port };
+        }
+        if printer.is_virtual() {
+            if let Some(path) = capture_path {
+                let trimmed = path.trim();
+                printer.capture_path = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
         }
 
         let was_default = self
@@ -493,6 +537,7 @@ mod tests {
             print_port: 9100,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         }
     }
 
@@ -509,6 +554,26 @@ mod tests {
     }
 
     #[test]
+    fn unknown_or_empty_connection_deserializes_as_network() {
+        assert_eq!(
+            serde_json::from_str::<Connection>("\"\"").unwrap(),
+            Connection::Network
+        );
+        assert_eq!(
+            serde_json::from_str::<Connection>("\"nope\"").unwrap(),
+            Connection::Network
+        );
+        assert_eq!(
+            serde_json::from_str::<Connection>("\"virtual\"").unwrap(),
+            Connection::Virtual
+        );
+        assert_eq!(
+            serde_json::to_string(&Connection::Virtual).unwrap(),
+            "\"virtual\""
+        );
+    }
+
+    #[test]
     fn display_name_prefers_explicit_name() {
         let p = PrinterInfo {
             name: Some("Shipping".into()),
@@ -520,6 +585,7 @@ mod tests {
             print_port: 9100,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         };
         assert_eq!(p.display_name(), "Shipping");
         assert!(p.matches_name("shipping"));
@@ -559,6 +625,7 @@ mod tests {
 
         let usb = PrinterInfo {
             connection: Connection::Usb,
+            capture_path: None,
             print_port: 0,
             config_port: 0,
             address: "/dev/ttyACM0".into(),
@@ -591,8 +658,14 @@ mod tests {
         assert_eq!(cfg.added_printers.len(), 1);
         assert_eq!(cfg.default_printer.as_ref().unwrap().address, "10.0.0.1");
 
-        cfg.update_printer("10.0.0.1", Some("Renamed".into()), "10.0.0.2".into(), 9100)
-            .unwrap();
+        cfg.update_printer(
+            "10.0.0.1",
+            Some("Renamed".into()),
+            "10.0.0.2".into(),
+            9100,
+            None,
+        )
+        .unwrap();
         assert_eq!(cfg.added_printers.len(), 1);
         assert_eq!(cfg.added_printers[0].address, "10.0.0.2");
         assert_eq!(cfg.added_printers[0].name.as_deref(), Some("Renamed"));
@@ -620,13 +693,13 @@ mod tests {
         cfg.upsert_printer(sample_printer("10.0.0.2", ""), false);
 
         assert!(cfg
-            .update_printer("9.9.9.9", None, "10.0.0.3".into(), 9100)
+            .update_printer("9.9.9.9", None, "10.0.0.3".into(), 9100, None)
             .is_err());
         assert!(cfg
-            .update_printer("10.0.0.1", None, "10.0.0.2".into(), 9100)
+            .update_printer("10.0.0.1", None, "10.0.0.2".into(), 9100, None)
             .is_err());
         assert!(cfg
-            .update_printer("10.0.0.1", None, "".into(), 9100)
+            .update_printer("10.0.0.1", None, "".into(), 9100, None)
             .is_err());
     }
 
@@ -634,7 +707,7 @@ mod tests {
     fn update_printer_zero_port_defaults_to_9100() {
         let mut cfg = AppConfig::default();
         cfg.upsert_printer(sample_printer("10.0.0.1", ""), true);
-        cfg.update_printer("10.0.0.1", None, "10.0.0.1".into(), 0)
+        cfg.update_printer("10.0.0.1", None, "10.0.0.1".into(), 0, None)
             .unwrap();
         assert_eq!(cfg.added_printers[0].print_port, 9100);
     }
@@ -802,13 +875,15 @@ mod tests {
     }
 
     #[test]
-    fn load_config_unknown_connection_uses_defaults() {
+    fn load_config_unknown_connection_is_network() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
         let json = r#"{"addedPrinters":[{"model":"ZD421","address":"10.0.0.1","connection":"bluetooth"}]}"#;
         fs::write(config_path(&path), json).unwrap();
         let loaded = load_config(&path).unwrap();
-        assert!(loaded.added_printers.is_empty());
-        assert!(!loaded.debug_logging);
+        assert_eq!(loaded.added_printers.len(), 1);
+        assert_eq!(loaded.added_printers[0].connection, Connection::Network);
+        assert_eq!(loaded.added_printers[0].address, "10.0.0.1");
+        assert!(config_path(&path).is_file());
     }
 }

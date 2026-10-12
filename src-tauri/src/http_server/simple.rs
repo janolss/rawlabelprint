@@ -336,4 +336,33 @@ mod tests {
         assert_eq!(body["error"], "Method not allowed");
         assert!(body.get("code").is_none());
     }
+
+    #[tokio::test]
+    async fn virtual_print_is_logged_when_debug_disabled_and_appends_capture() {
+        let dir =
+            std::env::temp_dir().join(format!("rawlabelprint-http-virtual-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let capture = dir.join("job.zpl");
+        let printer = crate::config::PrinterInfo {
+            name: Some("Preview".into()),
+            model: String::new(),
+            firmware: String::new(),
+            serial_number: String::new(),
+            address: "Preview".into(),
+            port: 0,
+            print_port: 0,
+            config_port: 0,
+            connection: crate::config::Connection::Virtual,
+            capture_path: Some(capture.display().to_string()),
+        };
+        let state = state_with_printer(printer, false).await;
+        let zpl = "^XA^FDVirtual^FS^XZ";
+        do_print(&state, &HeaderMap::new(), "", zpl)
+            .await
+            .expect("print ok");
+        assert_eq!(state.print_log.list().len(), 1);
+        assert!(state.print_log.list()[0].ok);
+        assert_eq!(std::fs::read(&capture).unwrap(), zpl.as_bytes());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

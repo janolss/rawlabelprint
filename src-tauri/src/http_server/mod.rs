@@ -9,7 +9,7 @@ mod simple;
 #[cfg(test)]
 pub(crate) mod test_util;
 
-use crate::config::{AppConfig, PrinterInfo};
+use crate::config::{AppConfig, Connection, PrinterInfo};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
 use axum::extract::DefaultBodyLimit;
@@ -53,7 +53,8 @@ impl HttpSharedState {
         data: &[u8],
         result: Result<(), String>,
     ) {
-        if !self.config.read().await.debug_logging {
+        let debug_logging = self.config.read().await.debug_logging;
+        if printer.connection != Connection::Virtual && !debug_logging {
             return;
         }
         self.print_log.record(route, printer, data, result);

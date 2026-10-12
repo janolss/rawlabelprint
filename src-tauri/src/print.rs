@@ -1,7 +1,7 @@
 //! RAW printing over TCP (LAN) or USB CDC/serial, plus HQES status.
 //! Also keeps short-lived sessions for Browser Print write→read flows.
 
-use crate::config::PrinterInfo;
+use crate::config::{Connection, PrinterInfo};
 use crate::usb_discovery::find_port_path_by_serial;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -191,6 +191,9 @@ impl DeviceSessionPool {
         printer: &PrinterInfo,
         data: &[u8],
     ) -> Result<(), String> {
+        if printer.connection == Connection::Virtual {
+            return accept_virtual_payload(printer, data);
+        }
         let key = session_key(origin, uid);
         let gate = Self::gate_for(&self.gates, &key)?;
         let _gate = gate.lock().map_err(|e| e.to_string())?;
@@ -225,6 +228,9 @@ impl DeviceSessionPool {
     }
 
     pub fn read(&self, uid: &str, origin: &str, printer: &PrinterInfo) -> Result<String, String> {
+        if printer.connection == Connection::Virtual {
+            return Ok(String::new());
+        }
         let key = session_key(origin, uid);
         let gate = Self::gate_for(&self.gates, &key)?;
         let _gate = gate.lock().map_err(|e| e.to_string())?;
@@ -383,6 +389,9 @@ fn printer_socket_addr(address: &str, port: u16) -> Result<SocketAddr, String> {
 }
 
 fn connect_printer(printer: &PrinterInfo) -> Result<PrinterStream, String> {
+    if printer.connection == Connection::Virtual {
+        return Err("Virtual printers do not open a device connection".into());
+    }
     if printer.is_usb() {
         connect_usb(printer)
     } else {
@@ -395,9 +404,31 @@ pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), Stri
 }
 
 pub fn send_raw_bytes_to_printer(printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
+    if printer.connection == Connection::Virtual {
+        return accept_virtual_payload(printer, data);
+    }
     let mut stream = connect_printer(printer)?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
     write_payload(&mut stream, data)
+}
+
+fn accept_virtual_payload(printer: &PrinterInfo, data: &[u8]) -> Result<(), String> {
+    let Some(path) = printer
+        .capture_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        return Ok(());
+    };
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("Printer write failed; delivery status is unknown: {e}"))?;
+    file.write_all(data)
+        .and_then(|_| file.flush())
+        .map_err(|e| format!("Printer write failed; delivery status is unknown: {e}"))
 }
 
 fn write_payload(stream: &mut impl Write, data: &[u8]) -> Result<(), String> {
@@ -572,6 +603,16 @@ fn get_usb_printer_status(printer: &PrinterInfo) -> PrinterStatus {
 }
 
 pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
+    if printer.connection == Connection::Virtual {
+        return PrinterStatus {
+            print_port: printer.print_port,
+            config_port: printer.config_port,
+            status: "online".into(),
+            error_messages: Vec::new(),
+            warning_messages: Vec::new(),
+            detail: None,
+        };
+    }
     if printer.is_usb() {
         return get_usb_printer_status(printer);
     }
@@ -868,6 +909,7 @@ mod tests {
             print_port: port,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         };
         let zpl = b"^XA^FDHi^FS^XZ";
         {
@@ -898,6 +940,7 @@ mod tests {
             print_port: port,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         };
         let pool = DeviceSessionPool::new();
         pool.write("MOCK1", "", &printer, b"x").unwrap();
@@ -935,6 +978,7 @@ mod tests {
             print_port: port,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         };
         let pool = DeviceSessionPool::new();
         for index in 0..MAX_DEVICE_SESSIONS {
@@ -980,6 +1024,7 @@ mod tests {
             print_port: port,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         }
     }
 
@@ -1069,5 +1114,55 @@ mod tests {
         assert!(reply.is_empty());
         assert!(started.elapsed() < Duration::from_secs(1));
         handle.join().unwrap();
+    }
+
+    fn virtual_printer(capture_path: Option<String>) -> PrinterInfo {
+        PrinterInfo {
+            name: Some("Preview".into()),
+            model: String::new(),
+            firmware: String::new(),
+            serial_number: String::new(),
+            address: "Preview".into(),
+            port: 0,
+            print_port: 0,
+            config_port: 0,
+            connection: Connection::Virtual,
+            capture_path,
+        }
+    }
+
+    #[test]
+    fn virtual_printer_accepts_payload_without_a_device_and_appends_capture_file() {
+        let dir =
+            std::env::temp_dir().join(format!("rawlabelprint-virtual-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let capture = dir.join("jobs.zpl");
+        let printer = virtual_printer(Some(capture.display().to_string()));
+
+        send_raw_to_printer(&printer, "^XA^FDHi^FS^XZ").unwrap();
+        send_raw_to_printer(&printer, "MORE").unwrap();
+        assert_eq!(std::fs::read(&capture).unwrap(), b"^XA^FDHi^FS^XZMORE");
+
+        let mut missing_parent = printer.clone();
+        missing_parent.capture_path = Some(dir.join("missing").join("x.zpl").display().to_string());
+        assert!(send_raw_to_printer(&missing_parent, "^XA^XZ").is_err());
+
+        let plain = virtual_printer(None);
+        let before = std::fs::read(&capture).unwrap();
+        send_raw_to_printer(&plain, "NO").unwrap();
+        assert_eq!(std::fs::read(&capture).unwrap(), before);
+
+        assert_eq!(get_printer_status(&printer).status, "online");
+
+        let pool = DeviceSessionPool::new();
+        pool.write("virtual:Preview", "", &printer, b"SESS")
+            .unwrap();
+        assert!(std::fs::read(&capture).unwrap().ends_with(b"SESS"));
+        assert!(pool
+            .read("virtual:Preview", "", &printer)
+            .unwrap()
+            .is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -43,6 +43,9 @@ const els = {
   manualAddress: requireEl<HTMLInputElement>("manualAddress"),
   manualPort: requireEl<HTMLInputElement>("manualPort"),
   addManualBtn: requireEl<HTMLButtonElement>("addManualBtn"),
+  virtualName: requireEl<HTMLInputElement>("virtualName"),
+  virtualCapturePath: requireEl<HTMLInputElement>("virtualCapturePath"),
+  addVirtualBtn: requireEl<HTMLButtonElement>("addVirtualBtn"),
   launchAtLogin: requireEl<HTMLInputElement>("launchAtLogin"),
   apiUrl: requireEl<HTMLElement>("apiUrl"),
   printLogList: requireEl<HTMLElement>("printLogList"),
@@ -203,15 +206,19 @@ function renderSaved(list: PrinterInfo[] | null | undefined): void {
       const btn = e.currentTarget as HTMLButtonElement;
       btn.disabled = true;
       try {
+        const virtual = card.dataset.connection === "virtual";
         currentConfig = await invoke<AppConfig>("update_printer", {
           originalAddress,
           name: fieldInput(card, "name").value.trim(),
-          address: fieldInput(card, "address").value.trim(),
+          address: virtual ? originalAddress : fieldInput(card, "address").value.trim(),
           printPort: (() => {
             const portEl = card.querySelector<HTMLInputElement>('[data-field="printPort"]');
             if (!portEl) return 0;
             return Number(portEl.value) || 9100;
           })(),
+          capturePath: virtual
+            ? card.querySelector<HTMLInputElement>('[data-field="capturePath"]')?.value.trim() ?? ""
+            : null,
         });
         applyConfig(currentConfig);
         await refreshAllPrinterStatuses();
@@ -586,6 +593,29 @@ els.searchBtn.addEventListener("click", async () => {
     els.searchResults.innerHTML = buildSearchErrorHtml(e);
   } finally {
     els.searchBtn.disabled = false;
+  }
+});
+
+els.addVirtualBtn.addEventListener("click", async () => {
+  const name = els.virtualName.value.trim();
+  if (!name) {
+    alert("Name is required.");
+    return;
+  }
+  els.addVirtualBtn.disabled = true;
+  try {
+    currentConfig = await invoke<AppConfig>("add_virtual_printer", {
+      name,
+      capturePath: els.virtualCapturePath.value.trim(),
+    });
+    applyConfig(currentConfig);
+    els.virtualName.value = "";
+    els.virtualCapturePath.value = "";
+    await refreshAllPrinterStatuses();
+  } catch (e) {
+    alert(String(e));
+  } finally {
+    els.addVirtualBtn.disabled = false;
   }
 });
 

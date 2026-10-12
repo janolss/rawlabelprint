@@ -63,7 +63,8 @@ impl AppState {
         data: &[u8],
         result: Result<(), String>,
     ) {
-        if !self.config.read().await.debug_logging {
+        let debug_logging = self.config.read().await.debug_logging;
+        if printer.connection != Connection::Virtual && !debug_logging {
             return;
         }
         self.print_log.record(route, printer, data, result);
@@ -103,6 +104,7 @@ impl AppState {
             },
             config_port: if network { 80 } else { 0 },
             connection: entry.connection,
+            capture_path: None,
         }
     }
 
@@ -177,6 +179,7 @@ mod tests {
             print_port,
             config_port: 80,
             connection: Connection::Network,
+            capture_path: None,
         }
     }
 
@@ -273,6 +276,7 @@ mod tests {
             print_port: 0,
             config_port: 0,
             connection: Connection::Usb,
+            capture_path: None,
         };
         state
             .record_print_log("/", &printer, b"^XA^XZ", Ok(()))

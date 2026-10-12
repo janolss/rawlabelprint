@@ -43,6 +43,32 @@ test("buildSavedPrintersHtml includes default and status badges", () => {
   assert.doesNotMatch(html, /Set as default/);
 });
 
+test("buildSavedPrintersHtml omits address and port for a virtual printer", () => {
+  const html = buildSavedPrintersHtml(
+    [
+      {
+        ...sample,
+        name: "Preview",
+        model: "",
+        address: "Preview",
+        connection: "virtual",
+        printPort: 0,
+        configPort: 0,
+        capturePath: "/tmp/labels.zpl",
+      },
+    ],
+    null,
+    new Map()
+  );
+  assert.match(html, /Preview/);
+  assert.match(html, />Virtual</);
+  assert.match(html, /data-field="capturePath"/);
+  assert.match(html, /\/tmp\/labels\.zpl/);
+  assert.doesNotMatch(html, /data-field="address"/);
+  assert.doesNotMatch(html, /data-field="printPort"/);
+  assert.match(html, /data-action="default"/);
+});
+
 test("statusBadgeHtml offline includes detail", () => {
   const statuses = new Map<string, UiPrinterStatus>([
     ["10.0.0.5", { kind: "offline", detail: "No route" }],
