@@ -522,6 +522,110 @@ pub fn save_config(app_data_dir: &Path, config: &AppConfig) -> Result<(), String
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrinterSiteFile {
+    default_printer: Option<PrinterInfo>,
+    added_printers: Vec<PrinterInfo>,
+    allowed_origins: Vec<String>,
+    denied_origins: Vec<String>,
+}
+
+fn normalize_imported_origins(raw: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for origin in raw {
+        let key = AppConfig::normalize_origin(origin);
+        if key.is_empty() || out.iter().any(|existing| existing == &key) {
+            continue;
+        }
+        out.push(key);
+    }
+    out
+}
+
+fn prepare_imported_printer(mut printer: PrinterInfo) -> Result<PrinterInfo, String> {
+    printer.name = printer
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    match printer.connection {
+        Connection::Network => {
+            printer.address = parse_ip_address(&printer.address)?;
+            if printer.print_port == 0 {
+                printer.print_port = default_print_port();
+            }
+            if printer.config_port == 0 {
+                printer.config_port = default_config_port();
+            }
+            printer.capture_path = None;
+        }
+        Connection::Usb => {
+            let address = printer.address.trim().to_string();
+            if address.is_empty() {
+                return Err("Device path is required".into());
+            }
+            printer.address = address;
+            printer.print_port = 0;
+            printer.config_port = 0;
+            printer.capture_path = None;
+        }
+        Connection::Virtual => {
+            let address = printer.address.trim().to_string();
+            if address.is_empty() {
+                let name = printer.name.as_deref().unwrap_or("").trim();
+                if name.is_empty() {
+                    return Err("Name is required".into());
+                }
+                printer.address = name.to_string();
+            } else {
+                printer.address = address;
+            }
+            printer.print_port = 0;
+            printer.config_port = 0;
+            let capture = printer.capture_path.take();
+            printer.capture_path = capture.and_then(|path| {
+                let trimmed = path.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            });
+        }
+    }
+    Ok(printer)
+}
+
+/// Replace saved printers and website lists. Leaves listen address, port, startup, and mode flags alone.
+pub fn import_printer_site(config: &mut AppConfig, json: &str) -> Result<(), String> {
+    let parsed: PrinterSiteFile =
+        serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
+    let default_printer = parsed
+        .default_printer
+        .map(prepare_imported_printer)
+        .transpose()?;
+    let added_printers = parsed
+        .added_printers
+        .into_iter()
+        .map(prepare_imported_printer)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut allowed_origins = normalize_imported_origins(&parsed.allowed_origins);
+    let denied_origins = normalize_imported_origins(&parsed.denied_origins);
+    if denied_origins.len() > MAX_DENIED_ORIGINS {
+        return Err(format!("At most {MAX_DENIED_ORIGINS} denied websites"));
+    }
+    allowed_origins.retain(|origin| !denied_origins.iter().any(|denied| denied == origin));
+
+    config.default_printer = default_printer;
+    config.added_printers = added_printers;
+    config.allowed_origins = allowed_origins;
+    config.denied_origins = denied_origins;
+    config.normalize_saved_printers();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,5 +989,108 @@ mod tests {
         assert_eq!(loaded.added_printers[0].connection, Connection::Network);
         assert_eq!(loaded.added_printers[0].address, "10.0.0.1");
         assert!(config_path(&path).is_file());
+    }
+
+    #[test]
+    fn config_schema_example_deserializes() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/config.schema.json");
+        let text = fs::read_to_string(&path).unwrap();
+        let schema: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let example = schema["examples"][0].clone();
+        let config: AppConfig = serde_json::from_value(example).unwrap();
+        assert_eq!(config.port, 9100);
+        assert!(config
+            .added_printers
+            .iter()
+            .any(|printer| printer.is_virtual()));
+        assert_eq!(
+            config.allowed_origins,
+            vec!["http://127.0.0.1:8080".to_string()]
+        );
+    }
+
+    #[test]
+    fn import_replaces_printers_and_origins_and_leaves_port_and_mode() {
+        let mut config = AppConfig {
+            port: 9101,
+            browser_print_compatible: false,
+            launch_at_login: true,
+            debug_logging: true,
+            ..AppConfig::default()
+        };
+        let json = r#"{
+            "defaultPrinter": {
+                "name": "Preview",
+                "model": "",
+                "address": "Preview",
+                "connection": "virtual",
+                "capturePath": "/tmp/labels.zpl",
+                "printPort": 0,
+                "configPort": 0
+            },
+            "addedPrinters": [
+                {
+                    "name": "LAN",
+                    "model": "ZD421",
+                    "address": "10.0.0.5",
+                    "connection": "network"
+                }
+            ],
+            "allowedOrigins": [" HTTP://127.0.0.1:8080 "],
+            "deniedOrigins": ["https://Blocked.Example"]
+        }"#;
+        import_printer_site(&mut config, json).unwrap();
+        assert_eq!(config.port, 9101);
+        assert!(!config.browser_print_compatible);
+        assert!(config.launch_at_login);
+        assert!(config.debug_logging);
+        assert_eq!(config.listen_address, "127.0.0.1");
+        assert_eq!(config.allowed_origins, vec!["http://127.0.0.1:8080"]);
+        assert_eq!(config.denied_origins, vec!["https://blocked.example"]);
+        assert_eq!(config.default_printer.as_ref().unwrap().address, "Preview");
+        assert!(config.default_printer.as_ref().unwrap().is_virtual());
+        assert!(config
+            .added_printers
+            .iter()
+            .any(|printer| printer.address == "10.0.0.5" && printer.print_port == 9100));
+        assert!(config
+            .added_printers
+            .iter()
+            .any(|printer| printer.address == "Preview"));
+    }
+
+    #[test]
+    fn import_invalid_printer_leaves_config_and_file_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let mut config = AppConfig {
+            port: 9101,
+            browser_print_compatible: false,
+            ..AppConfig::default()
+        };
+        save_config(&path, &config).unwrap();
+        let before = fs::read(config_path(&path)).unwrap();
+        let err = import_printer_site(
+            &mut config,
+            r#"{"defaultPrinter":null,"addedPrinters":[{"model":"ZD421","address":"not-an-ip","connection":"network"}],"allowedOrigins":[],"deniedOrigins":[]}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("IP address"));
+        assert_eq!(config.port, 9101);
+        assert!(!config.browser_print_compatible);
+        assert!(config.added_printers.is_empty());
+        assert_eq!(fs::read(config_path(&path)).unwrap(), before);
+    }
+
+    #[test]
+    fn import_rejects_unknown_fields() {
+        let mut config = AppConfig::default();
+        let err = import_printer_site(
+            &mut config,
+            r#"{"defaultPrinter":null,"addedPrinters":[],"allowedOrigins":[],"deniedOrigins":[],"port":1}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid JSON"));
+        assert!(config.added_printers.is_empty());
     }
 }

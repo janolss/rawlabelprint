@@ -54,6 +54,10 @@ const els = {
   originPendingList: requireEl<HTMLElement>("originPendingList"),
   originAllowedList: requireEl<HTMLElement>("originAllowedList"),
   originDeniedList: requireEl<HTMLElement>("originDeniedList"),
+  exportPrintersBtn: requireEl<HTMLButtonElement>("exportPrintersBtn"),
+  importPrintersBtn: requireEl<HTMLButtonElement>("importPrintersBtn"),
+  importPrintersFile: requireEl<HTMLInputElement>("importPrintersFile"),
+  transferStatus: requireEl<HTMLElement>("transferStatus"),
 };
 
 let currentConfig: AppConfig | null = null;
@@ -402,6 +406,61 @@ els.saveHttpBtn.addEventListener("click", async () => {
     els.httpStatus.textContent = `Status: error (${e})`;
   } finally {
     els.saveHttpBtn.disabled = false;
+  }
+});
+
+function downloadJson(filename: string, value: unknown): void {
+  const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+els.exportPrintersBtn.addEventListener("click", async () => {
+  els.transferStatus.textContent = "";
+  try {
+    const config = await invoke<AppConfig>("get_config");
+    downloadJson("rawlabelprint-printers.json", {
+      defaultPrinter: config.defaultPrinter ?? null,
+      addedPrinters: config.addedPrinters,
+      allowedOrigins: config.allowedOrigins ?? [],
+      deniedOrigins: config.deniedOrigins ?? [],
+    });
+    els.transferStatus.textContent = "Exported printers and websites.";
+  } catch (e) {
+    els.transferStatus.textContent = `Status: error (${e})`;
+  }
+});
+
+els.importPrintersBtn.addEventListener("click", () => {
+  els.importPrintersFile.value = "";
+  els.importPrintersFile.click();
+});
+
+els.importPrintersFile.addEventListener("change", async () => {
+  const file = els.importPrintersFile.files?.[0];
+  if (!file) return;
+  if (!confirm("Replace saved printers and website lists with this file?")) {
+    els.importPrintersFile.value = "";
+    return;
+  }
+  els.transferStatus.textContent = "";
+  try {
+    const payload = await file.text();
+    currentConfig = await invoke<AppConfig>("import_printers_and_websites", { payload });
+    applyConfig(currentConfig);
+    await refreshAllPrinterStatuses();
+    await refreshOriginPermissions();
+    els.transferStatus.textContent = "Imported printers and websites.";
+  } catch (e) {
+    els.transferStatus.textContent = `Status: error (${e})`;
+  } finally {
+    els.importPrintersFile.value = "";
   }
 });
 

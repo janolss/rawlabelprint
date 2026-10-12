@@ -24,6 +24,7 @@ export interface AppConfig {
   browserPrintCompatible: boolean;
   debugLogging: boolean;
   allowedOrigins?: string[];
+  deniedOrigins?: string[];
 }
 
 export interface OriginPermissions {

@@ -173,6 +173,20 @@
         </div>
 
         <section class="block">
+          <h3 class="block-subtitle">Printers and websites</h3>
+          <p class="hint">
+            Move saved printers and the website lists to another install. HTTP port, startup, and
+            Compatible mode stay as they are.
+          </p>
+          <div class="button-row">
+            <button type="button" id="exportPrintersBtn">Export printers and websites</button>
+            <button type="button" id="importPrintersBtn">Import printers and websites</button>
+          </div>
+          <input id="importPrintersFile" type="file" accept="application/json,.json" hidden />
+          <p class="status" id="transferStatus"></p>
+        </section>
+
+        <section class="block">
           <div class="block-header-row">
             <h3 class="block-subtitle">Recent prints</h3>
             <div class="button-row inline">

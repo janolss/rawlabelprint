@@ -31,3 +31,4 @@ reference/*
 src-tauri/target
 tauri.gitignore
 docs/*
+!docs/config.schema.json

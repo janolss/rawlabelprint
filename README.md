@@ -154,6 +154,8 @@ The tray icon may be hidden in the taskbar overflow area (^); drag it out to kee
 - **Linux:** `~/.local/share/se.rawlabelprint.desktop/config.json`
 - **Windows:** `%APPDATA%\se.rawlabelprint.desktop\config.json`
 
+Field names and types are described in [docs/config.schema.json](docs/config.schema.json). The running app does not load that file.
+
 ## Develop
 
 ### macOS

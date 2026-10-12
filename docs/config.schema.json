@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rawlabelprint.local/config.schema.json",
+  "title": "RawLabelPrint config.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "listenAddress": { "type": "string", "const": "127.0.0.1" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "defaultPrinter": { "$ref": "#/$defs/printer" },
+    "addedPrinters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/printer" }
+    },
+    "launchAtLogin": { "type": "boolean" },
+    "browserPrintCompatible": { "type": "boolean" },
+    "debugLogging": { "type": "boolean" },
+    "allowedOrigins": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "deniedOrigins": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "printer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "address"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "model": { "type": "string" },
+        "firmware": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "address": { "type": "string" },
+        "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "printPort": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "configPort": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "connection": { "enum": ["network", "usb", "virtual"] },
+        "capturePath": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "examples": [
+    {
+      "listenAddress": "127.0.0.1",
+      "port": 9100,
+      "defaultPrinter": {
+        "name": "Preview",
+        "model": "",
+        "address": "Preview",
+        "printPort": 0,
+        "configPort": 0,
+        "connection": "virtual",
+        "capturePath": "/tmp/labels.zpl"
+      },
+      "addedPrinters": [
+        {
+          "name": "Preview",
+          "model": "",
+          "address": "Preview",
+          "printPort": 0,
+          "configPort": 0,
+          "connection": "virtual",
+          "capturePath": "/tmp/labels.zpl"
+        },
+        {
+          "name": "LAN",
+          "model": "ZD421",
+          "address": "10.0.0.5",
+          "printPort": 9100,
+          "configPort": 80,
+          "connection": "network"
+        }
+      ],
+      "launchAtLogin": false,
+      "browserPrintCompatible": true,
+      "debugLogging": false,
+      "allowedOrigins": ["http://127.0.0.1:8080"],
+      "deniedOrigins": []
+    }
+  ]
+}

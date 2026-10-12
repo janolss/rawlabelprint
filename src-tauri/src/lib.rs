@@ -11,8 +11,8 @@ mod state;
 mod usb_discovery;
 
 use config::{
-    load_config, parse_ip_address, require_listen_port, sanitize_listen_address, save_config,
-    AppConfig, Connection, PrinterInfo,
+    import_printer_site, load_config, parse_ip_address, require_listen_port,
+    sanitize_listen_address, save_config, AppConfig, Connection, PrinterInfo,
 };
 use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
 use print::{get_printer_status, PrinterStatus};
@@ -218,6 +218,21 @@ async fn update_printer(
         )?;
     }
     state.persist().await?;
+    Ok(state.config.read().await.clone())
+}
+
+#[tauri::command]
+async fn import_printers_and_websites(
+    state: tauri::State<'_, Arc<AppState>>,
+    payload: String,
+) -> Result<AppConfig, String> {
+    {
+        let mut cfg = state.config.write().await;
+        let mut next = cfg.clone();
+        import_printer_site(&mut next, &payload)?;
+        save_config(&state.app_data_dir, &next)?;
+        *cfg = next;
+    }
     Ok(state.config.read().await.clone())
 }
 
@@ -539,6 +554,7 @@ pub fn run() {
             set_default_printer,
             add_manual_printer,
             add_virtual_printer,
+            import_printers_and_websites,
             update_printer,
             remove_added_printer,
             check_printer_status,
