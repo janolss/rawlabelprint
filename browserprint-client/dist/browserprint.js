@@ -7,55 +7,83 @@ function t(e = globalThis.navigator?.userAgent, t = globalThis.location?.protoco
 function n(e) {
 	return e instanceof Error ? e.name === "AbortError" ? "Request timed out" : e.message || String(e) : String(e);
 }
-async function r(e, t = {}) {
-	let r = t.timeoutMs ?? 15e3, i = new AbortController(), a = setTimeout(() => i.abort(), r);
+function r(e, t = {}) {
+	return {
+		...t,
+		debug: e
+	};
+}
+function i(e) {
+	return e.length <= 512 ? `body=${JSON.stringify(e)}` : `body=${JSON.stringify(e.slice(0, 512))} truncated ${e.length} chars`;
+}
+function a(e) {
+	return new TextEncoder().encode(e).length;
+}
+function o(e) {
+	if (e == null) return "";
+	if (typeof e == "string") return ` ${i(e)}`;
+	if (typeof URLSearchParams < "u" && e instanceof URLSearchParams) return ` ${i(e.toString())}`;
+	if (typeof Blob < "u" && e instanceof Blob) return ` body=${e.size} bytes`;
+	if (typeof FormData < "u" && e instanceof FormData) {
+		let t = 0;
+		for (let n of e.values()) t += typeof n == "string" ? a(n) : n.size;
+		return ` body=${t} bytes`;
+	}
+	return e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? ` body=${e.byteLength} bytes` : " body=(unlogged)";
+}
+function s(e, t, n, r, i) {
+	e && console.log(`BrowserPrint ${t} ${n} -> ${r}${o(i)}`);
+}
+async function c(e, t = {}) {
+	let r = t.timeoutMs ?? 15e3, i = t.method ?? "GET", a = new AbortController(), o = setTimeout(() => a.abort(), r), c = !1;
 	try {
 		let n = await fetch(e, {
-			method: t.method ?? "GET",
+			method: i,
 			body: t.body,
 			headers: t.headers,
-			signal: i.signal
+			signal: a.signal
 		}), r = await n.text();
-		if (t.raw) return r;
-		if (n.status !== 200) throw Error(r || `HTTP ${n.status}`);
-		return r;
-	} catch (e) {
-		throw Error(n(e));
+		if (t.raw) return s(t.debug, i, e, String(n.status), t.body), r;
+		if (n.status !== 200) throw s(t.debug, i, e, String(n.status), t.body), c = !0, Error(r || `HTTP ${n.status}`);
+		return s(t.debug, i, e, String(n.status), t.body), r;
+	} catch (r) {
+		throw c || s(t.debug, i, e, n(r), t.body), Error(n(r));
 	} finally {
-		clearTimeout(a);
+		clearTimeout(o);
 	}
 }
-async function i(e, t = {}) {
-	let r = t.timeoutMs ?? 15e3, i = new AbortController(), a = setTimeout(() => i.abort(), r);
+async function l(e, t = {}) {
+	let r = t.timeoutMs ?? 15e3, i = new AbortController(), a = setTimeout(() => i.abort(), r), o = !1;
 	try {
-		let t = await fetch(e, {
+		let n = await fetch(e, {
 			method: "GET",
 			signal: i.signal
 		});
-		if (t.status !== 200) {
-			let e = await t.text().catch(() => "");
-			throw Error(e || `HTTP ${t.status}`);
+		if (n.status !== 200) {
+			let r = await n.text().catch(() => "");
+			throw s(t.debug, "GET", e, String(n.status)), o = !0, Error(r || `HTTP ${n.status}`);
 		}
-		return await t.blob();
-	} catch (e) {
-		throw Error(n(e));
+		let r = await n.blob();
+		return s(t.debug, "GET", e, `${n.status} body=${r.size} bytes`), r;
+	} catch (r) {
+		throw o || s(t.debug, "GET", e, n(r)), Error(n(r));
 	} finally {
 		clearTimeout(a);
 	}
 }
-function a(e) {
+function u(e) {
 	try {
 		return JSON.parse(e);
 	} catch {
 		throw Error("Invalid JSON response from Browser Print agent");
 	}
 }
-function o(e, t) {
+function d(e, t) {
 	try {
 		e?.(t);
 	} catch {}
 }
-function s(e, t, r) {
+function f(e, t, r) {
 	let i = n(r), a = e ?? t;
 	try {
 		a ? a(i) : console.error("BrowserPrint error (no errorCallback):", i);
@@ -63,36 +91,36 @@ function s(e, t, r) {
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/typeof.js
-function c(e) {
+function p(e) {
 	"@babel/helpers - typeof";
-	return c = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
+	return p = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
 		return typeof e;
 	} : function(e) {
 		return e && typeof Symbol == "function" && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e;
-	}, c(e);
+	}, p(e);
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPrimitive.js
-function l(e, t) {
-	if (c(e) != "object" || !e) return e;
+function m(e, t) {
+	if (p(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
 	if (n !== void 0) {
 		var r = n.call(e, t || "default");
-		if (c(r) != "object") return r;
+		if (p(r) != "object") return r;
 		throw TypeError("@@toPrimitive must return a primitive value.");
 	}
 	return (t === "string" ? String : Number)(e);
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPropertyKey.js
-function u(e) {
-	var t = l(e, "string");
-	return c(t) == "symbol" ? t : t + "";
+function h(e) {
+	var t = m(e, "string");
+	return p(t) == "symbol" ? t : t + "";
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/defineProperty.js
-function d(e, t, n) {
-	return (t = u(t)) in e ? Object.defineProperty(e, t, {
+function g(e, t, n) {
+	return (t = h(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
 		enumerable: !0,
 		configurable: !0,
@@ -101,7 +129,7 @@ function d(e, t, n) {
 }
 //#endregion
 //#region src/device.ts
-function f(e) {
+function _(e) {
 	return {
 		name: e.name,
 		uid: e.uid,
@@ -112,68 +140,68 @@ function f(e) {
 		manufacturer: e.manufacturer
 	};
 }
-function p(e, t) {
+function v(e, t) {
 	return class {
 		constructor(e) {
-			d(this, "name", void 0), d(this, "deviceType", void 0), d(this, "connection", void 0), d(this, "uid", void 0), d(this, "version", void 0), d(this, "provider", void 0), d(this, "manufacturer", void 0), d(this, "readRetries", void 0), d(this, "sendErrorCallback", () => {}), d(this, "sendFinishedCallback", () => {}), d(this, "readErrorCallback", () => {}), d(this, "readFinishedCallback", () => {}), this.name = e.name, this.deviceType = e.deviceType, this.connection = e.connection, this.uid = e.uid, this.version = e.version ?? 2, this.provider = e.provider, this.manufacturer = e.manufacturer, this.readRetries = +(this.connection === "bluetooth");
+			g(this, "name", void 0), g(this, "deviceType", void 0), g(this, "connection", void 0), g(this, "uid", void 0), g(this, "version", void 0), g(this, "provider", void 0), g(this, "manufacturer", void 0), g(this, "readRetries", void 0), g(this, "sendErrorCallback", () => {}), g(this, "sendFinishedCallback", () => {}), g(this, "readErrorCallback", () => {}), g(this, "readFinishedCallback", () => {}), this.name = e.name, this.deviceType = e.deviceType, this.connection = e.connection, this.uid = e.uid, this.version = e.version ?? 2, this.provider = e.provider, this.manufacturer = e.manufacturer, this.readRetries = +(this.connection === "bluetooth");
 		}
 		send(n, i, a) {
-			let c = i ?? this.sendFinishedCallback, l = a ?? this.sendErrorCallback;
-			r(`${t}write`, {
+			let o = i ?? this.sendFinishedCallback, s = a ?? this.sendErrorCallback;
+			c(`${t}write`, r(e.debug, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					device: f(this),
+					device: _(this),
 					data: n
 				})
-			}).then((e) => o(c, e)).catch((t) => s(l, e.defaultErrorCallback, t));
+			})).then((e) => d(o, e)).catch((t) => f(s, e.defaultErrorCallback, t));
 		}
-		sendUrl(n, i, a, c) {
-			let l = i ?? this.sendFinishedCallback, u = a ?? this.sendErrorCallback, d = {
-				device: f(this),
+		sendUrl(n, i, a, o) {
+			let s = i ?? this.sendFinishedCallback, l = a ?? this.sendErrorCallback, u = {
+				device: _(this),
 				url: n
 			};
-			c != null && (d.options = c), r(`${t}write`, {
+			o != null && (u.options = o), c(`${t}write`, r(e.debug, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(d)
-			}).then((e) => o(l, e)).catch((t) => s(u, e.defaultErrorCallback, t));
+				body: JSON.stringify(u)
+			})).then((e) => d(s, e)).catch((t) => f(l, e.defaultErrorCallback, t));
 		}
 		sendFile(n, i, a) {
 			if (typeof n == "string") {
 				e.loadFileFromUrl(n, (e) => this.sendFile(e, i, a), a);
 				return;
 			}
-			let c = i ?? e.defaultSuccessCallback, l = a ?? e.defaultErrorCallback, u = new FormData();
-			u.append("json", JSON.stringify({ device: f(this) })), u.append("blob", n), r(`${t}write`, {
+			let o = i ?? e.defaultSuccessCallback, s = a ?? e.defaultErrorCallback, l = new FormData();
+			l.append("json", JSON.stringify({ device: _(this) })), l.append("blob", n), c(`${t}write`, r(e.debug, {
 				method: "POST",
-				body: u
-			}).then((e) => o(c, e)).catch((t) => s(l, e.defaultErrorCallback, t));
+				body: l
+			})).then((e) => d(o, e)).catch((t) => f(s, e.defaultErrorCallback, t));
 		}
 		convertAndSendFile(t, n, r, i) {
 			let a = { ...i ?? {} };
 			a.action || (a.action = "print"), e.convert(t, this, a, n, r);
 		}
 		read(n, i) {
-			let a = n ?? this.readFinishedCallback, c = i ?? this.readErrorCallback;
-			r(`${t}read`, {
+			let a = n ?? this.readFinishedCallback, o = i ?? this.readErrorCallback;
+			c(`${t}read`, r(e.debug, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ device: f(this) })
-			}).then((e) => o(a, e)).catch((t) => s(c, e.defaultErrorCallback, t));
+				body: JSON.stringify({ device: _(this) })
+			})).then((e) => d(a, e)).catch((t) => f(o, e.defaultErrorCallback, t));
 		}
 		readUntilStringReceived(e, t, n, r, i = "") {
-			let a = r ?? this.readRetries, s = t ?? this.readFinishedCallback, c = n ?? this.readErrorCallback;
+			let a = r ?? this.readRetries, o = t ?? this.readFinishedCallback, s = n ?? this.readErrorCallback;
 			this.read((t) => {
 				let n = a;
 				if (t && t.length !== 0) n = 0;
 				else if (n <= 0) {
-					o(s, i);
+					d(o, i);
 					return;
 				}
 				let r = i + t;
-				e !== "" && r.includes(e) ? o(s, r) : this.readUntilStringReceived(e, s, c, n - 1, r);
-			}, c);
+				e !== "" && r.includes(e) ? d(o, r) : this.readUntilStringReceived(e, o, s, n - 1, r);
+			}, s);
 		}
 		readAllAvailable(e, t, n) {
 			this.readUntilStringReceived("", e, t, n);
@@ -197,20 +225,22 @@ function p(e, t) {
 }
 //#endregion
 //#region src/api.ts
-function m(e) {
+function y(e) {
 	return e.uid && e.uid.length > 0 ? e.uid : `${e.name ?? ""}|${e.connection ?? ""}|${e.deviceType ?? ""}`;
 }
-function h(e) {
+function b(e) {
 	return e.length < 3 ? "" : e.substring(e.length - 3);
 }
-function g(e) {
+function x(e) {
 	return e.toLowerCase().replace("image/", "").replace("application/", "").replace("x-ms-", "");
 }
-function _(e = t()) {
-	let n = {}, c = /* @__PURE__ */ new Map();
-	return n.defaultSuccessCallback = () => {}, n.defaultErrorCallback = () => {}, n.ApplicationConfiguration = class {
+function S(e = {}) {
+	let n = typeof e == "string" ? { baseUrl: e } : e, i = n.baseUrl ?? t(), a = {};
+	a.debug = n.debug ?? !1;
+	let o = /* @__PURE__ */ new Map();
+	return a.defaultSuccessCallback = () => {}, a.defaultErrorCallback = () => {}, a.ApplicationConfiguration = class {
 		constructor() {
-			d(this, "application", {
+			g(this, "application", {
 				version: "1.2.0.3",
 				build_number: 3,
 				api_level: 2,
@@ -218,129 +248,129 @@ function _(e = t()) {
 				supportedConversions: {}
 			});
 		}
-	}, n.Device = p(n, e), n.getLocalDevices = (t, i, c) => {
-		r(`${e}available`, { method: "GET" }).then((e) => {
-			let r = a(e);
+	}, a.Device = v(a, i), a.getLocalDevices = (e, t, n) => {
+		c(`${i}available`, r(a.debug, { method: "GET" })).then((t) => {
+			let r = u(t);
 			for (let e of Object.keys(r)) {
 				let t = r[e];
-				Array.isArray(t) && (r[e] = t.map((e) => new n.Device(e)));
+				Array.isArray(t) && (r[e] = t.map((e) => new a.Device(e)));
 			}
-			c === void 0 ? o(t, r) : o(t, Array.isArray(r[c]) ? r[c] : []);
-		}).catch((e) => s(i, n.defaultErrorCallback, e));
-	}, n.getDefaultDevice = (t, i, c) => {
-		let l = "default";
-		t != null && (l = `default?type=${encodeURIComponent(t)}`), r(`${e}${l}`, { method: "GET" }).then((e) => {
+			n === void 0 ? d(e, r) : d(e, Array.isArray(r[n]) ? r[n] : []);
+		}).catch((e) => f(t, a.defaultErrorCallback, e));
+	}, a.getDefaultDevice = (e, t, n) => {
+		let o = "default";
+		e != null && (o = `default?type=${encodeURIComponent(e)}`), c(`${i}${o}`, r(a.debug, { method: "GET" })).then((e) => {
 			if (e === "") {
-				o(i, null);
+				d(t, null);
 				return;
 			}
-			let t = a(e);
-			o(i, new n.Device(t));
-		}).catch((e) => s(c, n.defaultErrorCallback, e));
-	}, n.getApplicationConfiguration = (t, i) => {
-		r(`${e}config`, { method: "GET" }).then((e) => {
-			if (e === "") {
-				o(t, null);
+			let n = u(e);
+			d(t, new a.Device(n));
+		}).catch((e) => f(n, a.defaultErrorCallback, e));
+	}, a.getApplicationConfiguration = (e, t) => {
+		c(`${i}config`, r(a.debug, { method: "GET" })).then((t) => {
+			if (t === "") {
+				d(e, null);
 				return;
 			}
-			o(t, a(e));
-		}).catch((e) => s(i, n.defaultErrorCallback, e));
-	}, n.readOnInterval = (e, t, r) => {
-		let i = r;
-		(i === void 0 || i === 0) && (i = 1);
-		let a = m(e);
-		n.stopReadOnInterval(e);
-		let s = { stopped: !1 }, l = () => {
+			d(e, u(t));
+		}).catch((e) => f(t, a.defaultErrorCallback, e));
+	}, a.readOnInterval = (e, t, n) => {
+		let r = n;
+		(r === void 0 || r === 0) && (r = 1);
+		let i = y(e);
+		a.stopReadOnInterval(e);
+		let s = { stopped: !1 }, c = () => {
 			s.stopped || e.read((e) => {
-				s.stopped || c.get(a) !== s || (o(t, e), s.timer = setTimeout(l, i));
+				s.stopped || o.get(i) !== s || (d(t, e), s.timer = setTimeout(c, r));
 			}, () => {
-				s.stopped || c.get(a) !== s || (s.timer = setTimeout(l, i));
+				s.stopped || o.get(i) !== s || (s.timer = setTimeout(c, r));
 			});
 		};
-		c.set(a, s), s.timer = setTimeout(l, i);
-	}, n.stopReadOnInterval = (e) => {
-		let t = m(e), n = c.get(t);
-		n !== void 0 && (n.stopped = !0, n.timer !== void 0 && clearTimeout(n.timer), c.delete(t));
-	}, n.bindFieldToReadData = (e, t, r, i) => {
-		n.readOnInterval(e, (e) => {
-			e !== "" && (t.value = e, i?.());
-		}, r);
-	}, n.loadFileFromUrl = (e, t, r) => {
-		i(e).then((e) => {
-			t && o(t, e);
-		}).catch((e) => s(r, n.defaultErrorCallback, e));
-	}, n.convert = (t, i, c, l, u) => {
-		if (!t) {
-			s(u, n.defaultErrorCallback, "Resource not specified");
+		o.set(i, s), s.timer = setTimeout(c, r);
+	}, a.stopReadOnInterval = (e) => {
+		let t = y(e), n = o.get(t);
+		n !== void 0 && (n.stopped = !0, n.timer !== void 0 && clearTimeout(n.timer), o.delete(t));
+	}, a.bindFieldToReadData = (e, t, n, r) => {
+		a.readOnInterval(e, (e) => {
+			e !== "" && (t.value = e, r?.());
+		}, n);
+	}, a.loadFileFromUrl = (e, t, n) => {
+		l(e, { debug: a.debug }).then((e) => {
+			t && d(t, e);
+		}).catch((e) => f(n, a.defaultErrorCallback, e));
+	}, a.convert = (e, t, n, o, s) => {
+		if (!e) {
+			f(s, a.defaultErrorCallback, "Resource not specified");
 			return;
 		}
-		if (typeof t == "string") {
-			let e = { ...c ?? {} };
-			n.loadFileFromUrl(t, (r) => {
-				e.fromFormat || (e.fromFormat = h(t)), n.convert(r, i, e, l, u);
-			}, u);
+		if (typeof e == "string") {
+			let r = { ...n ?? {} };
+			a.loadFileFromUrl(e, (n) => {
+				r.fromFormat || (r.fromFormat = b(e)), a.convert(n, t, r, o, s);
+			}, s);
 			return;
 		}
-		let d = { ...c ?? {} };
-		t.type && (t.type.startsWith("image/") || t.type.startsWith("application/")) && (d.fromFormat = g(t.type));
+		let l = { ...n ?? {} };
+		e.type && (e.type.startsWith("image/") || e.type.startsWith("application/")) && (l.fromFormat = x(e.type));
 		let p = {};
-		d != null && (p.options = d), i && (p.device = f(i));
+		l != null && (p.options = l), t && (p.device = _(t));
 		let m = new FormData();
-		m.append("json", JSON.stringify(p)), m.append("blob", t), r(`${e}convert`, {
+		m.append("json", JSON.stringify(p)), m.append("blob", e), c(`${i}convert`, r(a.debug, {
 			method: "POST",
 			body: m
-		}).then((e) => {
-			l && o(l, a(e));
-		}).catch((e) => s(u, n.defaultErrorCallback, e));
-	}, n.scanImage = (t, i, c, l) => {
-		if (!t) {
-			s(l, n.defaultErrorCallback, "Resource not specified");
+		})).then((e) => {
+			o && d(o, u(e));
+		}).catch((e) => f(s, a.defaultErrorCallback, e));
+	}, a.scanImage = (e, t, n, o) => {
+		if (!e) {
+			f(o, a.defaultErrorCallback, "Resource not specified");
 			return;
 		}
-		if (typeof t == "string") {
-			let e = { ...i ?? {} };
-			n.loadFileFromUrl(t, (r) => {
-				e.format || (e.format = h(t)), n.scanImage(r, e, c, l);
-			}, l);
+		if (typeof e == "string") {
+			let r = { ...t ?? {} };
+			a.loadFileFromUrl(e, (t) => {
+				r.format || (r.format = b(e)), a.scanImage(t, r, n, o);
+			}, o);
 			return;
 		}
-		let u = { ...i ?? {} };
-		t.type && (t.type.startsWith("image/") || t.type.startsWith("application/")) && (u.format = g(t.type));
-		let d = new FormData();
-		d.append("json", JSON.stringify({ options: u })), d.append("blob", t), r(`${e}convert/scan`, {
+		let s = { ...t ?? {} };
+		e.type && (e.type.startsWith("image/") || e.type.startsWith("application/")) && (s.format = x(e.type));
+		let l = new FormData();
+		l.append("json", JSON.stringify({ options: s })), l.append("blob", e), c(`${i}convert/scan`, r(a.debug, {
 			method: "POST",
-			body: d
-		}).then((e) => {
-			c && o(c, a(e));
-		}).catch((e) => s(l, n.defaultErrorCallback, e));
-	}, n;
+			body: l
+		})).then((e) => {
+			n && d(n, u(e));
+		}).catch((e) => f(o, a.defaultErrorCallback, e));
+	}, a;
 }
-function v(e) {
+function C(e) {
 	return e.length > 1 && e.charAt(0) === "" && e.charAt(e.length - 1) === "";
 }
-function y(e) {
+function w(e) {
 	return typeof e == "string" ? e : e instanceof Error ? e.message : String(e);
 }
-function b(e) {
+function T(e) {
 	return e.split("").map((e) => e.replace(/^[\s\x02]+/, "").trim()).filter((e) => e.length > 0).map((e) => e.split(",").map((e) => e.trim()));
 }
-function x(e, t) {
+function E(e, t) {
 	return e?.[t] === "1";
 }
-function S(e, t) {
+function D(e, t) {
 	let n = parseInt(e?.[t] ?? "", 10);
 	return Number.isNaN(n) ? void 0 : n;
 }
-var C = class {
+var O = class {
 	constructor(e) {
-		d(this, "raw", void 0), d(this, "offline", !1), d(this, "paperOut", !1), d(this, "paused", !1), d(this, "headOpen", !1), d(this, "ribbonOut", !1), d(this, "labelLengthDots", void 0), d(this, "formatsInBuffer", void 0), d(this, "bufferFull", !1), d(this, "partialFormatInProgress", !1), d(this, "corruptRam", !1), d(this, "underTemperature", !1), d(this, "overTemperature", !1), d(this, "labelsRemaining", void 0), this.raw = e ?? "";
+		g(this, "raw", void 0), g(this, "offline", !1), g(this, "paperOut", !1), g(this, "paused", !1), g(this, "headOpen", !1), g(this, "ribbonOut", !1), g(this, "labelLengthDots", void 0), g(this, "formatsInBuffer", void 0), g(this, "bufferFull", !1), g(this, "partialFormatInProgress", !1), g(this, "corruptRam", !1), g(this, "underTemperature", !1), g(this, "overTemperature", !1), g(this, "labelsRemaining", void 0), this.raw = e ?? "";
 		let t = this.raw.trim();
-		if (!v(t)) {
+		if (!C(t)) {
 			this.offline = !0;
 			return;
 		}
-		let [n, r] = b(t);
-		this.paperOut = x(n, 1), this.paused = x(n, 2), this.labelLengthDots = S(n, 3), this.formatsInBuffer = S(n, 4), this.bufferFull = x(n, 5), this.partialFormatInProgress = x(n, 7), this.corruptRam = x(n, 9), this.underTemperature = x(n, 10), this.overTemperature = x(n, 11), this.headOpen = x(r, 2), this.ribbonOut = x(r, 3), this.labelsRemaining = S(r, 8);
+		let [n, r] = T(t);
+		this.paperOut = E(n, 1), this.paused = E(n, 2), this.labelLengthDots = D(n, 3), this.formatsInBuffer = D(n, 4), this.bufferFull = E(n, 5), this.partialFormatInProgress = E(n, 7), this.corruptRam = E(n, 9), this.underTemperature = E(n, 10), this.overTemperature = E(n, 11), this.headOpen = E(r, 2), this.ribbonOut = E(r, 3), this.labelsRemaining = D(r, 8);
 	}
 	isFlagSet(e) {
 		return this.raw.charAt(e) === "1";
@@ -351,20 +381,20 @@ var C = class {
 	getMessage() {
 		return this.isPrinterReady() ? "Ready" : this.offline ? "Offline" : this.paperOut ? "Paper Out" : this.headOpen ? "Head Open" : this.ribbonOut ? "Ribbon Out" : this.paused ? "Paused" : "Ready";
 	}
-}, w = class {
+}, k = class {
 	constructor(e) {
-		if (d(this, "raw", void 0), d(this, "model", void 0), d(this, "firmware", void 0), d(this, "extra", void 0), !e) throw Error("Invalid Response");
+		if (g(this, "raw", void 0), g(this, "model", void 0), g(this, "firmware", void 0), g(this, "extra", void 0), !e) throw Error("Invalid Response");
 		this.raw = e;
 		let t = e.trim();
-		if (!v(t)) throw Error("Invalid Response");
+		if (!C(t)) throw Error("Invalid Response");
 		let n = t.slice(1, -1).split(",");
 		this.model = (n[0] ?? "").trim(), this.firmware = (n[1] ?? "").trim(), this.extra = n.slice(2).map((e) => e.trim());
 	}
-}, T = class {
+}, A = class {
 	constructor(e) {
-		if (d(this, "raw", void 0), d(this, "settings", {}), d(this, "darkness", void 0), d(this, "printSpeed", void 0), d(this, "printWidth", void 0), d(this, "labelLength", void 0), d(this, "firmwareVersion", void 0), d(this, "linkOSVersion", void 0), !e) throw Error("Invalid Response");
+		if (g(this, "raw", void 0), g(this, "settings", {}), g(this, "darkness", void 0), g(this, "printSpeed", void 0), g(this, "printWidth", void 0), g(this, "labelLength", void 0), g(this, "firmwareVersion", void 0), g(this, "linkOSVersion", void 0), !e) throw Error("Invalid Response");
 		let t = e.trim();
-		if (this.raw = t, !v(t)) throw Error("Invalid Response");
+		if (this.raw = t, !C(t)) throw Error("Invalid Response");
 		for (let e of t.replace("", "").replace("", "").split("\n")) {
 			let t = e.trim();
 			if (t === "") continue;
@@ -379,20 +409,20 @@ var C = class {
 		let n = this.settings;
 		this.darkness = parseFloat(n.DARKNESS), this.printSpeed = parseInt((n["PRINT SPEED"] ?? "").replace("IPS", "").trim(), 10), this.printWidth = parseInt(n["PRINT WIDTH"], 10), this.labelLength = parseInt(n["LABEL LENGTH"], 10), this.firmwareVersion = (n.FIRMWARE ?? "").replace("<-", "").trim(), this.linkOSVersion = Object.prototype.hasOwnProperty.call(n, "LINK-OS VERSION") ? n["LINK-OS VERSION"] : "0";
 	}
-}, E = 5, D = 1e3;
-function O(e, t, n, r) {
+}, j = 5, M = 1e3;
+function N(e, t, n, r) {
 	if (!t && !n) return new Promise((t, n) => e(t, n));
-	e((e) => t?.(e), (e) => s(n, r, e));
+	e((e) => t?.(e), (e) => f(n, r, e));
 }
-function k(e, t = {}) {
+function P(e, t = {}) {
 	let n = t.pollIntervalMs ?? 2e3, r = e.Device;
 	class i extends r {
 		constructor(e, t = {}) {
-			super(e), d(this, "configuration", void 0), d(this, "queue", []), t.autoLoadConfiguration !== !1 && this.loadConfigurationInBackground(1);
+			super(e), g(this, "configuration", void 0), g(this, "queue", []), t.autoLoadConfiguration !== !1 && this.loadConfigurationInBackground(1);
 		}
 		loadConfigurationInBackground(e) {
 			this.configuration || this.getConfiguration().catch(() => {
-				e >= E || setTimeout(() => this.loadConfigurationInBackground(e + 1), D * 2 ** (e - 1)).unref?.();
+				e >= j || setTimeout(() => this.loadConfigurationInBackground(e + 1), M * 2 ** (e - 1)).unref?.();
 			});
 		}
 		clearRequestQueue() {
@@ -434,51 +464,51 @@ function k(e, t = {}) {
 				try {
 					n({ value: e.parse ? e.parse(t) : t });
 				} catch (e) {
-					n({ error: y(e) });
+					n({ error: w(e) });
 				}
 			}, i = (e) => n({ error: e });
 			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, "", r, i) : this.sendThenReadAllAvailable(e.command, r, i);
 		}
 		getStatus(t, n) {
-			return O((e, t) => {
-				this.enqueue("status", "~hs\r\n", (e) => new C(e)).then((t) => e(t), t);
+			return N((e, t) => {
+				this.enqueue("status", "~hs\r\n", (e) => new O(e)).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		isPrinterReady(t, n) {
-			return O((e, t) => {
+			return N((e, t) => {
 				this.getStatus().then((n) => n.isPrinterReady() ? e(n.getMessage()) : t(n.getMessage()), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getInfo(t, n) {
-			return O((e, t) => {
-				this.enqueue("info", "~hi\r\n", (e) => new w(e)).then((t) => e(t), t);
+			return N((e, t) => {
+				this.enqueue("info", "~hi\r\n", (e) => new k(e)).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getConfiguration(t, n) {
-			return O((e, t) => {
+			return N((e, t) => {
 				this.enqueue("config", "^XA^HH^XZ", (e) => {
-					let t = new T(e);
+					let t = new A(e);
 					return this.configuration = t, t;
 				}).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getSGD(t, n, r) {
-			return O((e, n) => {
+			return N((e, n) => {
 				this.enqueue("sgd", `! U1 getvar "${t}"\r\n`).then((t) => e(t), n);
 			}, n, r, e.defaultErrorCallback);
 		}
 		setSGD(t, n, r, i) {
-			return O((e, r) => {
+			return N((e, r) => {
 				this.enqueue("set", `! U1 setvar "${t}" "${n}"\r\n`).then((t) => e(t), r);
 			}, r, i, e.defaultErrorCallback);
 		}
 		setThenGetSGD(t, n, r, i) {
-			return O((e, r) => {
+			return N((e, r) => {
 				this.setSGD(t, n).then(() => this.getSGD(t).then(e, r), r);
 			}, r, i, e.defaultErrorCallback);
 		}
 		query(t, n, r) {
-			return O((e, n) => {
+			return N((e, n) => {
 				this.enqueue("query", t).then((t) => e(t), n);
 			}, n, r, e.defaultErrorCallback);
 		}
@@ -486,7 +516,7 @@ function k(e, t = {}) {
 			return this.configuration ?? await this.getConfiguration();
 		}
 		convertWith(t, n, r, i, a) {
-			return O((i, a) => {
+			return N((i, a) => {
 				this.ensureConfiguration().then((o) => {
 					let s = {
 						...r ?? {},
@@ -509,7 +539,7 @@ function k(e, t = {}) {
 			return this.convertWith("store", e, t, n, r);
 		}
 	}
-	d(i, "Status", C), d(i, "Info", w), d(i, "Configuration", T);
+	g(i, "Status", O), g(i, "Info", k), g(i, "Configuration", A);
 	let a = /* @__PURE__ */ new Map(), o;
 	function s(e) {
 		return e.uid ?? `${e.name ?? ""}|${e.connection ?? ""}`;
@@ -528,7 +558,7 @@ function k(e, t = {}) {
 		for (let [e, t] of a) t.inFlight || (t.inFlight = !0, t.printer.getStatus().then((n) => {
 			t.inFlight = !1, c(t, e, n);
 		}, () => {
-			t.inFlight = !1, c(t, e, new C(""));
+			t.inFlight = !1, c(t, e, new O(""));
 		}));
 	}
 	return {
@@ -551,17 +581,17 @@ function k(e, t = {}) {
 }
 //#endregion
 //#region src/index.ts
-var A = _(), j = k(A);
-if (Object.assign(A, {
-	createBrowserPrint: _,
+var F = S(), I = P(F);
+if (Object.assign(F, {
+	createBrowserPrint: S,
 	DEFAULT_TIMEOUT_MS: e,
 	resolveBaseUrl: t,
-	Zebra: j
+	Zebra: I
 }), typeof globalThis < "u") {
 	let e = globalThis;
-	e.BrowserPrint = A, e.Zebra = j;
+	e.BrowserPrint = F, e.Zebra = I;
 }
 //#endregion
-export { A as default };
+export { F as default };
 
 //# sourceMappingURL=browserprint.js.map

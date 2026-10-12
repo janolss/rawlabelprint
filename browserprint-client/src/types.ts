@@ -110,6 +110,8 @@ export interface DeviceLike extends DeviceInfo {
 }
 
 export interface BrowserPrintAPI {
+  /** When true, HTTP calls log method, URL, status, and a truncated body. */
+  debug: boolean;
   Device: new (info: DeviceInfo) => DeviceLike;
   defaultSuccessCallback: SuccessCallback;
   defaultErrorCallback: ErrorCallback;

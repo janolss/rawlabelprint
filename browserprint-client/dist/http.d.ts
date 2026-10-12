@@ -12,7 +12,11 @@ export type RequestOptions = {
     timeoutMs?: number;
     /** When true, return response body even for non-OK status (caller handles). */
     raw?: boolean;
+    /** When true, log method, URL, status, and a truncated body to the console. */
+    debug?: boolean;
 };
+/** Copy request options and attach the caller's current debug flag. */
+export declare function withDebug(debug: boolean, options?: RequestOptions): RequestOptions;
 /**
  * fetch wrapper with timeout and consistent string errors.
  * Resolves with response text on HTTP 200 (Zebra client only treats 200 as success).
@@ -23,6 +27,7 @@ export declare function requestText(url: string, options?: RequestOptions): Prom
  */
 export declare function requestBlob(url: string, options?: {
     timeoutMs?: number;
+    debug?: boolean;
 }): Promise<Blob>;
 /** Safe JSON.parse that throws a clear Error. */
 export declare function parseJson<T>(text: string): T;

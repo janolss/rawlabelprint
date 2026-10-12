@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { createBrowserPrint } from "../src/api";
 import {
   DEFAULT_TIMEOUT_MS,
   parseJson,
+  requestBlob,
   requestText,
   resolveBaseUrl,
 } from "../src/http";
@@ -46,6 +48,127 @@ test("requestText rejects non-200 with body message", async () => {
     () => requestText("http://127.0.0.1:9100/write"),
     /Device not found/
   );
+});
+
+test("requestText does not log when debug is off", async () => {
+  let calls = 0;
+  const original = console.log;
+  console.log = () => {
+    calls += 1;
+  };
+  try {
+    globalThis.fetch = async () => new Response("ok", { status: 200 });
+    await requestText("http://127.0.0.1:9100/available", {
+      method: "GET",
+      debug: false,
+    });
+    assert.equal(calls, 0);
+  } finally {
+    console.log = original;
+  }
+});
+
+test("requestText debug logs method, url, status, and truncated text", async () => {
+  const logs: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(" "));
+  };
+  try {
+    const payload = "x".repeat(600);
+    globalThis.fetch = async () => new Response("ok", { status: 200 });
+    await requestText("http://127.0.0.1:9100/write", {
+      method: "POST",
+      body: payload,
+      debug: true,
+    });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /BrowserPrint POST http:\/\/127\.0\.0\.1:9100\/write -> 200/);
+    assert.match(logs[0], /truncated 600 chars/);
+    assert.equal(logs[0].includes("x".repeat(513)), false);
+  } finally {
+    console.log = original;
+  }
+});
+
+test("requestText debug logs multipart as a byte length", async () => {
+  const logs: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(" "));
+  };
+  try {
+    const form = new FormData();
+    form.append("json", "{}");
+    form.append("blob", new Blob(["^XA^XZ"]));
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    await requestText("http://127.0.0.1:9100/write", {
+      method: "POST",
+      body: form,
+      debug: true,
+    });
+    assert.match(logs[0], /body=\d+ bytes/);
+    assert.equal(logs[0].includes("^XA"), false);
+  } finally {
+    console.log = original;
+  }
+});
+
+test("requestText debug logs timeouts and keeps the error string", async () => {
+  const logs: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(" "));
+  };
+  try {
+    globalThis.fetch = async (_input, init) => {
+      const signal = init?.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          const err = new Error("Aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    };
+    await assert.rejects(
+      () =>
+        requestText("http://127.0.0.1:9100/write", {
+          method: "POST",
+          body: "abc",
+          timeoutMs: 20,
+          debug: true,
+        }),
+      /Request timed out/
+    );
+    assert.match(logs[0], /POST http:\/\/127\.0\.0\.1:9100\/write -> Request timed out/);
+    assert.match(logs[0], /body="abc"/);
+  } finally {
+    console.log = original;
+  }
+});
+
+test("requestBlob debug logs status and byte length", async () => {
+  const logs: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(" "));
+  };
+  try {
+    globalThis.fetch = async () => new Response("hello", { status: 200 });
+    const blob = await requestBlob("http://127.0.0.1:9100/file", { debug: true });
+    assert.equal(blob.size, 5);
+    assert.match(logs[0], /GET http:\/\/127\.0\.0\.1:9100\/file -> 200 body=5 bytes/);
+  } finally {
+    console.log = original;
+  }
+});
+
+test("createBrowserPrint keeps the string argument and defaults debug to false", () => {
+  const bp = createBrowserPrint("http://127.0.0.1:9100/");
+  assert.equal(bp.debug, false);
+  const traced = createBrowserPrint({ debug: true });
+  assert.equal(traced.debug, true);
 });
 
 test("requestText maps abort to timeout message", async () => {

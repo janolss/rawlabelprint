@@ -6,6 +6,7 @@ import {
   requestBlob,
   requestText,
   resolveBaseUrl,
+  withDebug,
 } from "./http";
 import type {
   ApplicationConfigurationData,
@@ -42,10 +43,21 @@ function mimeToFormat(type: string): string {
     .replace("x-ms-", "");
 }
 
+export type CreateBrowserPrintOptions = {
+  baseUrl?: string;
+  debug?: boolean;
+};
+
 export function createBrowserPrint(
-  baseUrl: string = resolveBaseUrl()
+  baseUrlOrOptions: string | CreateBrowserPrintOptions = {}
 ): BrowserPrintAPI {
+  const options: CreateBrowserPrintOptions =
+    typeof baseUrlOrOptions === "string"
+      ? { baseUrl: baseUrlOrOptions }
+      : baseUrlOrOptions;
+  const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const api = {} as BrowserPrintAPI;
+  api.debug = options.debug ?? false;
   const readIntervals = new Map<
     string,
     { stopped: boolean; timer?: ReturnType<typeof setTimeout> }
@@ -73,7 +85,7 @@ export function createBrowserPrint(
     error?: ErrorCallback,
     deviceType?: string
   ): void => {
-    void requestText(`${baseUrl}available`, { method: "GET" })
+    void requestText(`${baseUrl}available`, withDebug(api.debug, { method: "GET" }))
       .then((text) => {
         const response = parseJson<Record<string, unknown>>(text);
         for (const key of Object.keys(response)) {
@@ -107,7 +119,7 @@ export function createBrowserPrint(
     if (deviceType !== undefined && deviceType !== null) {
       path = `default?type=${encodeURIComponent(deviceType)}`;
     }
-    void requestText(`${baseUrl}${path}`, { method: "GET" })
+    void requestText(`${baseUrl}${path}`, withDebug(api.debug, { method: "GET" }))
       .then((text) => {
         if (text === "") {
           invokeSuccess(finished, null);
@@ -125,7 +137,7 @@ export function createBrowserPrint(
     finished: SuccessCallback<ApplicationConfigurationData | null>,
     error?: ErrorCallback
   ): void => {
-    void requestText(`${baseUrl}config`, { method: "GET" })
+    void requestText(`${baseUrl}config`, withDebug(api.debug, { method: "GET" }))
       .then((text) => {
         if (text === "") {
           invokeSuccess(finished, null);
@@ -210,7 +222,7 @@ export function createBrowserPrint(
     finished?: SuccessCallback<Blob>,
     error?: ErrorCallback
   ): void => {
-    void requestBlob(url)
+    void requestBlob(url, { debug: api.debug })
       .then((blob) => {
         if (finished) {
           invokeSuccess(finished, blob);
@@ -273,7 +285,10 @@ export function createBrowserPrint(
     form.append("json", JSON.stringify(meta));
     form.append("blob", resource);
 
-    void requestText(`${baseUrl}convert`, { method: "POST", body: form })
+    void requestText(
+      `${baseUrl}convert`,
+      withDebug(api.debug, { method: "POST", body: form })
+    )
       .then((text) => {
         if (finished) {
           invokeSuccess(finished, parseJson<unknown>(text));
@@ -327,10 +342,10 @@ export function createBrowserPrint(
     form.append("json", JSON.stringify({ options: opts }));
     form.append("blob", resource);
 
-    void requestText(`${baseUrl}convert/scan`, {
-      method: "POST",
-      body: form,
-    })
+    void requestText(
+      `${baseUrl}convert/scan`,
+      withDebug(api.debug, { method: "POST", body: form })
+    )
       .then((text) => {
         if (finished) {
           invokeSuccess(finished, parseJson<unknown>(text));

@@ -34,7 +34,72 @@ export type RequestOptions = {
   timeoutMs?: number;
   /** When true, return response body even for non-OK status (caller handles). */
   raw?: boolean;
+  /** When true, log method, URL, status, and a truncated body to the console. */
+  debug?: boolean;
 };
+
+const DEBUG_TEXT_CHARS = 512;
+
+/** Copy request options and attach the caller's current debug flag. */
+export function withDebug(
+  debug: boolean,
+  options: RequestOptions = {}
+): RequestOptions {
+  return { ...options, debug };
+}
+
+function textNote(text: string): string {
+  if (text.length <= DEBUG_TEXT_CHARS) {
+    return `body=${JSON.stringify(text)}`;
+  }
+  return `body=${JSON.stringify(text.slice(0, DEBUG_TEXT_CHARS))} truncated ${text.length} chars`;
+}
+
+function byteLength(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+function bodyNote(body: BodyInit | null | undefined): string {
+  if (body == null) {
+    return "";
+  }
+  if (typeof body === "string") {
+    return ` ${textNote(body)}`;
+  }
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+    return ` ${textNote(body.toString())}`;
+  }
+  if (typeof Blob !== "undefined" && body instanceof Blob) {
+    return ` body=${body.size} bytes`;
+  }
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    let bytes = 0;
+    for (const value of body.values()) {
+      bytes += typeof value === "string" ? byteLength(value) : value.size;
+    }
+    return ` body=${bytes} bytes`;
+  }
+  if (body instanceof ArrayBuffer) {
+    return ` body=${body.byteLength} bytes`;
+  }
+  if (ArrayBuffer.isView(body)) {
+    return ` body=${body.byteLength} bytes`;
+  }
+  return " body=(unlogged)";
+}
+
+function logDebug(
+  debug: boolean | undefined,
+  method: string,
+  url: string,
+  outcome: string,
+  body?: BodyInit | null
+): void {
+  if (!debug) {
+    return;
+  }
+  console.log(`BrowserPrint ${method} ${url} -> ${outcome}${bodyNote(body)}`);
+}
 
 /**
  * fetch wrapper with timeout and consistent string errors.
@@ -45,12 +110,14 @@ export async function requestText(
   options: RequestOptions = {}
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const method = options.method ?? "GET";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let logged = false;
 
   try {
     const response = await fetch(url, {
-      method: options.method ?? "GET",
+      method,
       body: options.body,
       headers: options.headers,
       signal: controller.signal,
@@ -59,16 +126,23 @@ export async function requestText(
     const text = await response.text();
 
     if (options.raw) {
+      logDebug(options.debug, method, url, String(response.status), options.body);
       return text;
     }
 
     // Mirror original XHR client: only status 200 is success.
     if (response.status !== 200) {
+      logDebug(options.debug, method, url, String(response.status), options.body);
+      logged = true;
       throw new Error(text || `HTTP ${response.status}`);
     }
 
+    logDebug(options.debug, method, url, String(response.status), options.body);
     return text;
   } catch (err) {
+    if (!logged) {
+      logDebug(options.debug, method, url, errorMessage(err), options.body);
+    }
     throw new Error(errorMessage(err));
   } finally {
     clearTimeout(timer);
@@ -80,11 +154,12 @@ export async function requestText(
  */
 export async function requestBlob(
   url: string,
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; debug?: boolean } = {}
 ): Promise<Blob> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let logged = false;
 
   try {
     const response = await fetch(url, {
@@ -93,10 +168,17 @@ export async function requestBlob(
     });
     if (response.status !== 200) {
       const text = await response.text().catch(() => "");
+      logDebug(options.debug, "GET", url, String(response.status));
+      logged = true;
       throw new Error(text || `HTTP ${response.status}`);
     }
-    return await response.blob();
+    const blob = await response.blob();
+    logDebug(options.debug, "GET", url, `${response.status} body=${blob.size} bytes`);
+    return blob;
   } catch (err) {
+    if (!logged) {
+      logDebug(options.debug, "GET", url, errorMessage(err));
+    }
     throw new Error(errorMessage(err));
   } finally {
     clearTimeout(timer);

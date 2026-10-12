@@ -26,6 +26,18 @@ Built artifact: [`dist/BrowserPrint.min.js`](dist/BrowserPrint.min.js) (IIFE, gl
 
 ESM: `import BrowserPrint from '@rawlabelprint/browserprint-client'`.
 
+## Debug
+
+Off by default. Either line turns on console logging of method, URL, status, and body. Text bodies are cut at 512 characters. Blob and multipart bodies are logged as a byte length.
+
+```js
+BrowserPrint.debug = true;
+```
+
+```js
+createBrowserPrint({ debug: true });
+```
+
 ## Build / test
 
 From repo root:

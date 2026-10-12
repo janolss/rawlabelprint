@@ -2,6 +2,7 @@ import {
   invokeError,
   invokeSuccess,
   requestText,
+  withDebug,
 } from "./http";
 import type {
   BrowserPrintAPI,
@@ -70,14 +71,17 @@ export function createDeviceClass(
     ): void {
       const success = finished ?? this.sendFinishedCallback;
       const failure = error ?? this.sendErrorCallback;
-      void requestText(`${baseUrl}write`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          device: devicePayload(this),
-          data,
-        }),
-      })
+      void requestText(
+        `${baseUrl}write`,
+        withDebug(api.debug, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            device: devicePayload(this),
+            data,
+          }),
+        })
+      )
         .then((text) => invokeSuccess(success, text))
         .catch((err) => invokeError(failure, api.defaultErrorCallback, err));
     }
@@ -97,11 +101,14 @@ export function createDeviceClass(
       if (options != null) {
         body.options = options;
       }
-      void requestText(`${baseUrl}write`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
+      void requestText(
+        `${baseUrl}write`,
+        withDebug(api.debug, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      )
         .then((text) => invokeSuccess(success, text))
         .catch((err) => invokeError(failure, api.defaultErrorCallback, err));
     }
@@ -126,10 +133,13 @@ export function createDeviceClass(
       form.append("json", JSON.stringify({ device: devicePayload(this) }));
       form.append("blob", resource);
 
-      void requestText(`${baseUrl}write`, {
-        method: "POST",
-        body: form,
-      })
+      void requestText(
+        `${baseUrl}write`,
+        withDebug(api.debug, {
+          method: "POST",
+          body: form,
+        })
+      )
         .then((text) => invokeSuccess(success, text))
         .catch((err) => invokeError(failure, api.defaultErrorCallback, err));
     }
@@ -157,11 +167,14 @@ export function createDeviceClass(
     read(finished?: SuccessCallback, error?: ErrorCallback): void {
       const success = finished ?? this.readFinishedCallback;
       const failure = error ?? this.readErrorCallback;
-      void requestText(`${baseUrl}read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device: devicePayload(this) }),
-      })
+      void requestText(
+        `${baseUrl}read`,
+        withDebug(api.debug, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device: devicePayload(this) }),
+        })
+      )
         .then((text) => invokeSuccess(success, text))
         .catch((err) => invokeError(failure, api.defaultErrorCallback, err));
     }
