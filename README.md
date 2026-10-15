@@ -278,6 +278,10 @@ Artifact: `src-tauri/target/release/bundle/nsis/RawLabelPrint_*-setup.exe` (per-
 - Network printers must be reachable on the LAN (Wi‑Fi/Ethernet). USB printers need a CDC/ACM serial interface (Zebra VID `0x0A5F`); CUPS-only / `usblp`-only devices are out of scope for this MVP.
 - HTTPS on port **9101** (Safari + https pages) is not implemented yet; use HTTP pages or Chrome against port **9100**.
 
+## Contributing
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+
 ## Security
 
 To report a vulnerability, see [SECURITY.md](.github/SECURITY.md).
