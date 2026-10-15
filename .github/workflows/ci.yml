@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     # Pin for WebKitGTK 4.1 and to avoid ubuntu-latest → 26 migration surprises.
