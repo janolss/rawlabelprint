@@ -1,10 +1,19 @@
 //! Soft allowlist for browser `Origin` on print and device requests.
 //!
+//! Authorization is the allow/deny list (and pending approval), not CORS.
+//! `origin_cors_middleware` enforces the allowlist for every route and mirrors
+//! the request `Origin` into `Access-Control-Allow-Origin` (never `*`) so
+//! browsers can read success and 403 bodies.
+//!
 //! Requests without an Origin header and without browser `Sec-Fetch-*` metadata
 //! (curl/scripts) are allowed. Browser origins must be approved once in Settings.
 
+use crate::http_server::response::{json_err_code, ORIGIN_DENIED};
 use crate::http_server::HttpSharedState;
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use std::time::{Duration, Instant};
 
 pub(crate) const DENIED_STATUS: StatusCode = StatusCode::FORBIDDEN;
@@ -45,6 +54,60 @@ fn browser_fetch_metadata(headers: &HeaderMap) -> bool {
 /// Origin string used to isolate device sessions. Empty when the client sent none.
 pub fn session_origin(headers: &HeaderMap) -> String {
     request_origin(headers).unwrap_or_default()
+}
+
+/// Reflect request Origin for CORS; omit when the client sent none (curl/scripts).
+fn apply_cors_headers(headers: &mut HeaderMap, origin: Option<&str>) {
+    let Some(origin) = origin else {
+        return;
+    };
+    let Ok(value) = HeaderValue::from_str(origin) else {
+        return;
+    };
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+    headers.insert(header::VARY, HeaderValue::from_static("Origin"));
+}
+
+fn preflight_response(req_headers: &HeaderMap, origin: Option<&str>) -> Response {
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    let headers = response.headers_mut();
+    apply_cors_headers(headers, origin);
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, OPTIONS"),
+    );
+    let allow_headers = req_headers
+        .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+        .cloned()
+        .unwrap_or_else(|| HeaderValue::from_static("content-type"));
+    headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, allow_headers);
+    response
+}
+
+/// Central origin gate + CORS for all HTTP routes. OPTIONS skips the allowlist
+/// queue so preflight does not spam Settings; GET/POST still enqueue pending.
+pub async fn origin_cors_middleware(
+    State(state): State<HttpSharedState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let headers = req.headers().clone();
+    let method = req.method().clone();
+    let origin = request_origin(&headers);
+
+    if method == Method::OPTIONS {
+        return preflight_response(&headers, origin.as_deref());
+    }
+
+    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
+        let mut response = json_err_code(status, ORIGIN_DENIED, msg);
+        apply_cors_headers(response.headers_mut(), origin.as_deref());
+        return response;
+    }
+
+    let mut response = next.run(req).await;
+    apply_cors_headers(response.headers_mut(), origin.as_deref());
+    response
 }
 
 /// Returns Ok(()) if the request may use printers.
@@ -132,8 +195,12 @@ pub async fn permissions_snapshot(state: &HttpSharedState) -> OriginPermissions 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_server::test_util::test_state;
-    use axum::http::HeaderValue;
+    use crate::http_server::test_util::{
+        body_json, build_test_router, sample_printer, test_state,
+    };
+    use axum::body::Body;
+    use axum::http::{HeaderValue, Request};
+    use tower::ServiceExt;
 
     fn headers_with_origin(origin: &str) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -142,6 +209,19 @@ mod tests {
             HeaderValue::from_str(origin).unwrap(),
         );
         h
+    }
+
+    fn acao(response: &axum::response::Response) -> Option<&str> {
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|v| v.to_str().ok())
+    }
+
+    fn assert_never_star(response: &axum::response::Response) {
+        if let Some(value) = acao(response) {
+            assert_ne!(value, "*");
+        }
     }
 
     #[test]
@@ -286,5 +366,178 @@ mod tests {
         assert!(list_pending(&state).await.is_empty());
         let snap = permissions_snapshot(&state).await;
         assert_eq!(snap.denied, vec!["https://blocked.test".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn middleware_allowed_origin_gets_exact_acao() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        {
+            let mut cfg = state.config.write().await;
+            cfg.allow_origin("https://app.example");
+        }
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::ORIGIN, "https://app.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(acao(&response), Some("https://app.example"));
+        assert_eq!(
+            response.headers().get(header::VARY).and_then(|v| v.to_str().ok()),
+            Some("Origin")
+        );
+        assert_never_star(&response);
+    }
+
+    #[tokio::test]
+    async fn middleware_new_origin_is_forbidden_with_mirrored_acao() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::ORIGIN, "https://new.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(acao(&response), Some("https://new.example"));
+        assert_never_star(&response);
+        let body = body_json(response).await;
+        assert_eq!(body["code"], "ORIGIN_DENIED");
+        assert_eq!(
+            list_pending(&state).await,
+            vec!["https://new.example".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn middleware_denied_origin_is_forbidden_without_pending() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        {
+            let mut cfg = state.config.write().await;
+            cfg.deny_origin("https://blocked.example");
+        }
+        let app = build_test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/available")
+                    .header(header::ORIGIN, "https://blocked.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(acao(&response), Some("https://blocked.example"));
+        assert_never_star(&response);
+        assert!(list_pending(&state).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn middleware_curl_without_origin_has_no_acao() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn middleware_browser_metadata_without_origin_is_forbidden() {
+        let state = test_state(true, None);
+        let app = build_test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("sec-fetch-mode", "no-cors")
+                    .header("sec-fetch-dest", "image")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(list_pending(&state).await.is_empty());
+        assert_never_star(&response);
+    }
+
+    #[tokio::test]
+    async fn middleware_preflight_does_not_queue_pending() {
+        let state = test_state(true, None);
+        let app = build_test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/")
+                    .header(header::ORIGIN, "https://preflight.example")
+                    .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                    .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(acao(&response), Some("https://preflight.example"));
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+                .and_then(|v| v.to_str().ok()),
+            Some("GET, POST, OPTIONS")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                .and_then(|v| v.to_str().ok()),
+            Some("content-type")
+        );
+        assert_never_star(&response);
+        assert!(list_pending(&state).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn middleware_config_requires_approved_origin() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        let app = build_test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/config")
+                    .header(header::ORIGIN, "https://config.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(acao(&response), Some("https://config.example"));
+        assert_never_star(&response);
+        let body = body_json(response).await;
+        assert_eq!(body["code"], "ORIGIN_DENIED");
+        assert_eq!(
+            list_pending(&state).await,
+            vec!["https://config.example".to_string()]
+        );
     }
 }

@@ -2,19 +2,19 @@ use crate::http_server::fetch::fetch_url_bytes;
 use crate::http_server::multipart::{
     multipart_boundary, parse_multipart_parts, parse_write_request,
 };
-use crate::http_server::origin::{ensure_origin_allowed, session_origin};
+use crate::http_server::origin::session_origin;
 use crate::http_server::resolve::{
     collect_known_printers, resolve_by_device_ref, BrowserDeviceRef,
 };
 use crate::http_server::response::{
     empty_ok, json_err, json_err_code, json_ok, public_print_error, text_ok, COMPAT_DISABLED,
-    DEVICE_NOT_FOUND, ORIGIN_DENIED, PRINTER_UNREACHABLE,
+    DEVICE_NOT_FOUND, PRINTER_UNREACHABLE,
 };
 use crate::http_server::HttpSharedState;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -66,22 +66,10 @@ async fn require_compatible(state: &HttpSharedState) -> Result<(), Response> {
 
 pub(crate) async fn handle_available(
     State(state): State<HttpSharedState>,
-    method: Method,
-    headers: HeaderMap,
+    _method: Method,
 ) -> Response {
-    if method == Method::OPTIONS {
-        return (
-            StatusCode::NO_CONTENT,
-            [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
-            "",
-        )
-            .into_response();
-    }
     if let Err(resp) = require_compatible(&state).await {
         return resp;
-    }
-    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     let printers = collect_known_printers(&state).await;
@@ -101,23 +89,11 @@ pub(crate) async fn handle_available(
 
 pub(crate) async fn handle_default(
     State(state): State<HttpSharedState>,
-    method: Method,
-    headers: HeaderMap,
+    _method: Method,
     Query(query): Query<DefaultQuery>,
 ) -> Response {
-    if method == Method::OPTIONS {
-        return (
-            StatusCode::NO_CONTENT,
-            [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
-            "",
-        )
-            .into_response();
-    }
     if let Err(resp) = require_compatible(&state).await {
         return resp;
-    }
-    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     // BrowserPrint.js treats empty body as null default device.
@@ -161,9 +137,6 @@ pub(crate) async fn handle_write(
 ) -> Response {
     if let Err(resp) = require_compatible(&state).await {
         return resp;
-    }
-    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     let parsed = match parse_write_request(&headers, &body) {
@@ -282,9 +255,6 @@ async fn handle_convert_inner(
     let looks_raw = blob_looks_like_raw_label(&blob);
 
     if action.eq_ignore_ascii_case("print") && looks_raw {
-        if let Err((status, msg)) = ensure_origin_allowed(state, headers).await {
-            return Ok(json_err_code(status, ORIGIN_DENIED, msg));
-        }
         let device = meta
             .device
             .ok_or_else(|| "device required when options.action=print".to_string())?;
@@ -352,9 +322,6 @@ pub(crate) async fn handle_read(
 ) -> Response {
     if let Err(resp) = require_compatible(&state).await {
         return resp;
-    }
-    if let Err((status, msg)) = ensure_origin_allowed(&state, &headers).await {
-        return json_err_code(status, ORIGIN_DENIED, msg);
     }
 
     let parsed: ReadBody = match serde_json::from_slice(&body) {
@@ -627,8 +594,9 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
     #[tokio::test]
     async fn available_and_read_require_an_approved_origin() {
         let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
-        let app = build_test_router(state.clone());
+        let app = build_test_router(state);
         let available = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/available")
@@ -640,19 +608,19 @@ Content-Disposition: form-data; name=\"blob\"\r\n\r\n\
             .unwrap();
         assert_eq!(available.status(), StatusCode::FORBIDDEN);
 
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::ORIGIN,
-            HeaderValue::from_static("https://new.example"),
-        );
-        let response = handle_read(
-            State(state),
-            headers,
-            Bytes::from(r#"{"device":{"uid":"SN1"}}"#),
-        )
-        .await;
-        let (parts, _) = response.into_response().into_parts();
-        assert_eq!(parts.status, StatusCode::FORBIDDEN);
+        let read = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/read")
+                    .header(header::ORIGIN, "https://new.example")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"device":{"uid":"SN1"}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(read.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

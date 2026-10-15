@@ -18,10 +18,7 @@ pub(crate) fn error_json(msg: impl Into<String>, code: Option<&str>) -> String {
 pub(crate) fn json_ok(body: String) -> Response {
     (
         StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/json"),
-            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        ],
+        [(header::CONTENT_TYPE, "application/json")],
         body,
     )
         .into_response()
@@ -38,10 +35,7 @@ pub(crate) fn json_err_code(status: StatusCode, code: &str, msg: impl Into<Strin
 fn json_body(status: StatusCode, body: String) -> Response {
     (
         status,
-        [
-            (header::CONTENT_TYPE, "application/json"),
-            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        ],
+        [(header::CONTENT_TYPE, "application/json")],
         body,
     )
         .into_response()
@@ -50,10 +44,7 @@ fn json_body(status: StatusCode, body: String) -> Response {
 pub(crate) fn text_ok(body: String) -> Response {
     (
         StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
-            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        ],
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
         body,
     )
         .into_response()
@@ -74,10 +65,7 @@ pub(crate) fn public_print_error(err: &str) -> String {
 pub(crate) fn empty_ok() -> Response {
     (
         StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
-            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        ],
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
         String::new(),
     )
         .into_response()

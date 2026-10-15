@@ -13,13 +13,14 @@ use crate::config::{AppConfig, Connection, PrinterInfo};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
 use axum::extract::DefaultBodyLimit;
-use axum::http::Method;
+use axum::middleware;
 use axum::routing::{any, get, post};
 use axum::Router;
 use browser_print::{
     handle_available, handle_bp_config, handle_convert, handle_convert_scan, handle_default,
     handle_read, handle_write,
 };
+use origin::origin_cors_middleware;
 use simple::handle_root;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -27,7 +28,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, oneshot, Mutex, RwLock, Semaphore};
-use tower_http::cors::{Any, CorsLayer};
 
 /// Max HTTP request body size (simple API, /write, /convert, …).
 pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
@@ -76,11 +76,7 @@ impl HttpServerHandle {
 }
 
 pub(crate) fn build_app_router(state: HttpSharedState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
-
+    let state_for_mw = state.clone();
     Router::new()
         // RawLabelPrint simple API (always on)
         .route("/", any(handle_root))
@@ -95,7 +91,10 @@ pub(crate) fn build_app_router(state: HttpSharedState) -> Router {
         .route("/convert/scan", post(handle_convert_scan))
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_HTTP_BODY_BYTES))
-        .layer(cors)
+        .layer(middleware::from_fn_with_state(
+            state_for_mw,
+            origin_cors_middleware,
+        ))
 }
 
 pub async fn start_http_server(
