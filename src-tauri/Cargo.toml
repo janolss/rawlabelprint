@@ -2,7 +2,8 @@
 name = "rawlabelprint"
 version = "0.3.0"
 description = "Raw label printing tray app for macOS, Linux and Windows (Zebra LAN/USB printers)"
-authors = ["RawLabelPrint"]
+authors = ["Jan Olsson"]
+license = "MIT"
 edition = "2021"
 
 [lib]

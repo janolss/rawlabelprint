@@ -277,3 +277,7 @@ Artifact: `src-tauri/target/release/bundle/nsis/RawLabelPrint_*-setup.exe` (per-
 - Do not run Zebra Browser Print at the same time (both use UDP **4201** / HTTP **9100**).
 - Network printers must be reachable on the LAN (Wi‑Fi/Ethernet). USB printers need a CDC/ACM serial interface (Zebra VID `0x0A5F`); CUPS-only / `usblp`-only devices are out of scope for this MVP.
 - HTTPS on port **9101** (Safari + https pages) is not implemented yet; use HTTP pages or Chrome against port **9100**.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
