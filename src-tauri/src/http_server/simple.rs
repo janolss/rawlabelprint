@@ -42,12 +42,9 @@ pub(crate) async fn handle_root(
 
     match result {
         Ok(body) => json_ok(body),
-        Err((status, body)) => (
-            status,
-            [(header::CONTENT_TYPE, "application/json")],
-            body,
-        )
-            .into_response(),
+        Err((status, body)) => {
+            (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
+        }
     }
 }
 

@@ -33,12 +33,7 @@ pub(crate) fn json_err_code(status: StatusCode, code: &str, msg: impl Into<Strin
 }
 
 fn json_body(status: StatusCode, body: String) -> Response {
-    (
-        status,
-        [(header::CONTENT_TYPE, "application/json")],
-        body,
-    )
-        .into_response()
+    (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 pub(crate) fn text_ok(body: String) -> Response {

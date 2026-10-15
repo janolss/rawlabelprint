@@ -195,9 +195,7 @@ pub async fn permissions_snapshot(state: &HttpSharedState) -> OriginPermissions 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_server::test_util::{
-        body_json, build_test_router, sample_printer, test_state,
-    };
+    use crate::http_server::test_util::{body_json, build_test_router, sample_printer, test_state};
     use axum::body::Body;
     use axum::http::{HeaderValue, Request};
     use tower::ServiceExt;
@@ -389,7 +387,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(acao(&response), Some("https://app.example"));
         assert_eq!(
-            response.headers().get(header::VARY).and_then(|v| v.to_str().ok()),
+            response
+                .headers()
+                .get(header::VARY)
+                .and_then(|v| v.to_str().ok()),
             Some("Origin")
         );
         assert_never_star(&response);
