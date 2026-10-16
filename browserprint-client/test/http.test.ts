@@ -167,6 +167,7 @@ test("requestBlob debug logs status and byte length", async () => {
 test("createBrowserPrint keeps the string argument and defaults debug to false", () => {
   const bp = createBrowserPrint("http://127.0.0.1:9100/");
   assert.equal(bp.debug, false);
+  assert.equal(bp.allowedUrlOrigins, null);
   const traced = createBrowserPrint({ debug: true });
   assert.equal(traced.debug, true);
 });

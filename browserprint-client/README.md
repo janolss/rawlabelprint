@@ -26,6 +26,8 @@ Built artifact: [`dist/BrowserPrint.min.js`](dist/BrowserPrint.min.js) (IIFE, gl
 
 ESM: `import BrowserPrint from '@rawlabelprint/browserprint-client'`.
 
+In a browser document, the ESM build also sets `window.BrowserPrint` / `window.Zebra` when those globals are not already defined. Outside a document context (e.g. Node), globals are not attached.
+
 ## Debug
 
 Off by default. Either line turns on console logging of method, URL, status, and body. Text bodies are cut at 512 characters. Blob and multipart bodies are logged as a byte length.
@@ -37,6 +39,25 @@ BrowserPrint.debug = true;
 ```js
 createBrowserPrint({ debug: true });
 ```
+
+## URL allowlist (opt-in)
+
+By default the client does not restrict URL arguments (Zebra-compatible). Host apps that pass user-controlled URLs into `sendUrl`, `loadFileFromUrl`, or string resources for `convert` / `scanImage` / `sendFile` should either validate themselves or enable a client allowlist:
+
+```js
+const bp = createBrowserPrint({
+  allowedUrlOrigins: ["https://cdn.example.com"],
+});
+// or later: bp.allowedUrlOrigins = ["https://cdn.example.com"];
+```
+
+When set and non-empty, only matching origins are accepted. Origin allowlisting for the Browser Print HTTP API itself remains on the RawLabelPrint agent.
+
+## Security notes for host apps
+
+- Do not pass untrusted strings into `getSGD` / `setSGD`. Names and values must not contain `"` or control characters; the client rejects those with a clear error.
+- Prefer an `allowedUrlOrigins` allowlist (or equivalent host validation) whenever URLs come from user input.
+- `readUntilStringReceived` / `readAllAvailable` stop with an error if accumulated read data exceeds 2 MiB.
 
 ## Build / test
 
@@ -75,8 +96,10 @@ Supported: `getStatus`, `isPrinterReady`, `getInfo`, `getConfiguration`, `getSGD
 
 - `Zebra.Printer.Status/Info/Configuration` exist from the start, not after the first `Printer` is constructed.
 - `~HS` is parsed per field instead of fixed character offsets (works with `\n` or `\r\n`); extra fields such as `bufferFull`, `corruptRam`, `labelsRemaining` are added.
-- `Configuration` tolerates missing keys (`NaN`/empty) instead of failing.
+- `Configuration` tolerates missing keys (`NaN`/empty) instead of failing; `printImageAsLabel` still requires finite positive `printWidth`/`labelLength` before calling `/convert`.
 - A failed request no longer causes the next queued request to be skipped; `setSGD` is queued so it cannot interleave with a pending query.
+- `getSGD` / `setSGD` reject names or values that contain `"` or control characters.
+- Optional `allowedUrlOrigins` can restrict URL-based APIs; unset means unrestricted (Zebra-like).
 - `isPrinterReady` forwards transport errors to the error callback.
 - The background `^HH` load stops after 5 attempts (exponential back-off) and can be disabled: `new Zebra.Printer(device, { autoLoadConfiguration: false })`.
 - `Zebra.watch` polls only while something is watched, never overlaps polls per printer, and accepts a plain `Device`.
@@ -91,4 +114,4 @@ Supported: `getStatus`, `isPrinterReady`, `getInfo`, `getConfiguration`, `getSGD
 
 - Mirrors `BrowserPrint-3.1.250` and `BrowserPrint-Zebra-1.1.250`
 - `fetch` + timeouts + string error callbacks
-- Origin allowlisting is handled by RawLabelPrint’s HTTP server, not this client
+- Agent HTTP origin allowlisting is handled by RawLabelPrint’s HTTP server; the client may optionally add `allowedUrlOrigins` for URL APIs

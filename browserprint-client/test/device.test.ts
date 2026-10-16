@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { createBrowserPrint } from "../src/api";
-import { devicePayload } from "../src/device";
+import {
+  deviceKey,
+  devicePayload,
+  MAX_READ_ACCUMULATED_BYTES,
+} from "../src/device";
 
 const originalFetch = globalThis.fetch;
 const BASE = "http://127.0.0.1:9100/";
@@ -80,6 +84,51 @@ test("sendThenRead chains write then read", async () => {
     `POST ${BASE}write`,
     `POST ${BASE}read`,
   ]);
+});
+
+test("deviceKey uses uid when present, else name|connection|deviceType", () => {
+  assert.equal(
+    deviceKey({ uid: "u1", name: "A", connection: "network", deviceType: "printer" }),
+    "u1"
+  );
+  assert.equal(
+    deviceKey({ uid: "", name: "A", connection: "network", deviceType: "printer" }),
+    "A|network|printer"
+  );
+  assert.equal(
+    deviceKey({ name: "A", connection: "network", deviceType: "printer" }),
+    "A|network|printer"
+  );
+});
+
+test("readUntilStringReceived errors when accumulated data exceeds the limit", async () => {
+  const bp = createBrowserPrint(BASE);
+  const chunk = "x".repeat(Math.floor(MAX_READ_ACCUMULATED_BYTES / 2) + 1);
+  let reads = 0;
+  globalThis.fetch = async (input) => {
+    if (String(input).endsWith("/read")) {
+      reads += 1;
+      return new Response(chunk, { status: 200 });
+    }
+    return new Response("{}", { status: 200 });
+  };
+  const device = new bp.Device({
+    name: "P",
+    uid: "u-overflow",
+    connection: "network",
+    deviceType: "printer",
+  });
+
+  const message = await new Promise<string>((resolve) => {
+    device.readUntilStringReceived(
+      "never-matches",
+      () => resolve("unexpected-success"),
+      (err) => resolve(err)
+    );
+  });
+
+  assert.match(message, /Read buffer exceeded maximum size/);
+  assert.equal(reads, 2);
 });
 
 test("readOnInterval keys timers by uid (two devices do not clobber)", async () => {

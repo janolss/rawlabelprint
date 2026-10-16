@@ -21,7 +21,8 @@
  *   accepts a plain `Device`.
  * - Conversion helpers copy the options object instead of mutating the caller's.
  */
-import { invokeError } from "./http";
+import { deviceKey } from "./device";
+import { invokeError, invokeSuccess } from "./http";
 import type {
   BrowserPrintAPI,
   ConvertOptions,
@@ -30,6 +31,13 @@ import type {
   ErrorCallback,
   SuccessCallback,
 } from "./types";
+
+/** Reject SGD name/value that would break out of quoted getvar/setvar. */
+function assertSgdToken(value: string, label: "name" | "value"): void {
+  if (/["\x00-\x1f\x7f]/.test(value)) {
+    throw new Error(`Invalid SGD ${label}`);
+  }
+}
 
 const STX = "\x02";
 const ETX = "\x03";
@@ -233,7 +241,7 @@ function dual<T>(
     return new Promise<T>((resolve, reject) => run(resolve, reject));
   }
   run(
-    (value) => success?.(value),
+    (value) => invokeSuccess(success, value),
     (reason) => invokeError(error, fallbackError, reason)
   );
   return undefined;
@@ -470,6 +478,12 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
     getSGD(name: string, ok?: SuccessCallback<string>, fail?: ErrorCallback): Promise<string> | undefined {
       return dual<string>(
         (resolve, reject) => {
+          try {
+            assertSgdToken(name, "name");
+          } catch (err) {
+            reject(errorText(err));
+            return;
+          }
           this.enqueue("sgd", `! U1 getvar "${name}"\r\n`).then((v) => resolve(v as string), reject);
         },
         ok,
@@ -486,6 +500,13 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
     ): Promise<string> | undefined {
       return dual<string>(
         (resolve, reject) => {
+          try {
+            assertSgdToken(name, "name");
+            assertSgdToken(value, "value");
+          } catch (err) {
+            reject(errorText(err));
+            return;
+          }
           this.enqueue("set", `! U1 setvar "${name}" "${value}"\r\n`).then(
             (v) => resolve(v as string),
             reject
@@ -540,6 +561,15 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
           this.ensureConfiguration().then((cfg) => {
             const opts: ConvertOptions = { ...(options ?? {}), action };
             if (action === "print") {
+              if (
+                !Number.isFinite(cfg.printWidth) ||
+                cfg.printWidth <= 0 ||
+                !Number.isFinite(cfg.labelLength) ||
+                cfg.labelLength <= 0
+              ) {
+                reject("Printer configuration incomplete: printWidth/labelLength");
+                return;
+              }
               (opts as Record<string, unknown>).fitTo = {
                 width: cfg.printWidth,
                 height: cfg.labelLength,
@@ -594,7 +624,7 @@ export function createZebra(api: BrowserPrintAPI, config: ZebraConfig = {}): Zeb
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function keyOf(device: DeviceInfo | DeviceLike): string {
-    return device.uid ?? `${device.name ?? ""}|${device.connection ?? ""}`;
+    return deviceKey(device);
   }
 
   function deliver(w: Watcher, key: string, status: PrinterStatus): void {

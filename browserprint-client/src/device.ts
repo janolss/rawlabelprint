@@ -1,4 +1,5 @@
 import {
+  assertUrlAllowed,
   invokeError,
   invokeSuccess,
   requestText,
@@ -8,9 +9,57 @@ import type {
   BrowserPrintAPI,
   ConvertOptions,
   DeviceInfo,
+  DeviceLike,
   ErrorCallback,
   SuccessCallback,
 } from "./types";
+
+/** Cap for accumulated read data in readUntilStringReceived / readAllAvailable. */
+export const MAX_READ_ACCUMULATED_BYTES = 2 * 1024 * 1024;
+
+const textEncoder = new TextEncoder();
+
+/** Stable key for read intervals and watch maps. */
+export function deviceKey(device: DeviceInfo | DeviceLike): string {
+  if (device.uid && device.uid.length > 0) {
+    return device.uid;
+  }
+  return `${device.name ?? ""}|${device.connection ?? ""}|${device.deviceType ?? ""}`;
+}
+
+/** Validate agent JSON before hydrating a Device instance. */
+export function asDeviceInfo(item: unknown): DeviceInfo {
+  if (item == null || typeof item !== "object" || Array.isArray(item)) {
+    throw new Error("Invalid device info from Browser Print agent");
+  }
+  const raw = item as Record<string, unknown>;
+  const stringFields = [
+    "name",
+    "deviceType",
+    "connection",
+    "uid",
+    "provider",
+    "manufacturer",
+  ] as const;
+  for (const key of stringFields) {
+    const value = raw[key];
+    if (value !== undefined && typeof value !== "string") {
+      throw new Error(`Invalid device info field: ${key}`);
+    }
+  }
+  if (raw.version !== undefined && typeof raw.version !== "number") {
+    throw new Error("Invalid device info field: version");
+  }
+  return {
+    name: raw.name as string | undefined,
+    deviceType: raw.deviceType as string | undefined,
+    connection: raw.connection as string | undefined,
+    uid: raw.uid as string | undefined,
+    version: raw.version as number | undefined,
+    provider: raw.provider as string | undefined,
+    manufacturer: raw.manufacturer as string | undefined,
+  };
+}
 
 /** Serializable device payload for /write and /read. */
 export function devicePayload(device: {
@@ -94,6 +143,12 @@ export function createDeviceClass(
     ): void {
       const success = finished ?? this.sendFinishedCallback;
       const failure = error ?? this.sendErrorCallback;
+      try {
+        assertUrlAllowed(url, api.allowedUrlOrigins);
+      } catch (err) {
+        invokeError(failure, api.defaultErrorCallback, err);
+        return;
+      }
       const body: Record<string, unknown> = {
         device: devicePayload(this),
         url,
@@ -201,6 +256,14 @@ export function createDeviceClass(
           }
 
           const next = accumulated + chunk;
+          if (textEncoder.encode(next).byteLength > MAX_READ_ACCUMULATED_BYTES) {
+            invokeError(
+              failure,
+              api.defaultErrorCallback,
+              "Read buffer exceeded maximum size"
+            );
+            return;
+          }
           if (needle !== "" && next.includes(needle)) {
             invokeSuccess(success, next);
           } else {

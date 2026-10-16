@@ -60,6 +60,11 @@ export interface DeviceLike extends DeviceInfo {
 export interface BrowserPrintAPI {
     /** When true, HTTP calls log method, URL, status, and a truncated body. */
     debug: boolean;
+    /**
+     * When set and non-empty, only these URL origins may be used with sendUrl /
+     * loadFileFromUrl (and string resources that load via URL). Null/empty = unrestricted.
+     */
+    allowedUrlOrigins: string[] | null;
     Device: new (info: DeviceInfo) => DeviceLike;
     defaultSuccessCallback: SuccessCallback;
     defaultErrorCallback: ErrorCallback;

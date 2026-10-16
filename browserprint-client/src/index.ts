@@ -49,12 +49,16 @@ declare global {
   }
 }
 
-// Ensure script-tag / IIFE consumers always see window.BrowserPrint and window.Zebra.
-if (typeof globalThis !== "undefined") {
+// Browser drop-in: expose globals only in a document context, and only if unset.
+if (typeof document !== "undefined") {
   const g = globalThis as typeof globalThis & {
     BrowserPrint?: BrowserPrintAPI;
     Zebra?: ZebraAPI;
   };
-  g.BrowserPrint = BrowserPrint;
-  g.Zebra = Zebra;
+  if (g.BrowserPrint == null) {
+    g.BrowserPrint = BrowserPrint;
+  }
+  if (g.Zebra == null) {
+    g.Zebra = Zebra;
+  }
 }

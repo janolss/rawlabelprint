@@ -231,6 +231,39 @@ test("SGD get/set/setThenGet", async () => {
   ]);
 });
 
+test("SGD rejects quotes and control characters in name/value", async () => {
+  const { printer, fake } = setup({
+    'getvar "device.host_status"': '"ready"',
+  });
+  await assert.rejects(
+    () => printer.getSGD('x" y')!,
+    (e) => e === "Invalid SGD name"
+  );
+  await assert.rejects(
+    () => printer.setSGD("ok.name", 'a\nb')!,
+    (e) => e === "Invalid SGD value"
+  );
+  assert.deepEqual(fake.written, []);
+});
+
+test("throwing SGD success callback does not break the client", async () => {
+  const { printer } = setup({
+    'getvar "device.host_status"': '"ready"',
+    "~hs": HS_READY,
+  });
+  await new Promise<void>((resolve) => {
+    printer.getSGD(
+      "device.host_status",
+      () => {
+        throw new Error("consumer boom");
+      },
+      () => {}
+    );
+    setTimeout(resolve, 0);
+  });
+  assert.equal((await printer.getStatus()).getMessage(), "Ready");
+});
+
 test("query sends arbitrary command and returns reply", async () => {
   const { printer } = setup({ "~hq": "\x02MODEL\x03" });
   assert.equal(await printer.query("~hq"), "\x02MODEL\x03");
@@ -276,6 +309,24 @@ test("convert errors reach the error callback", async () => {
   const { bp, printer } = setup({ "^HH": HH });
   bp.convert = (_r, _d, _o, _ok, err) => err?.("Image/PDF conversion is not supported.");
   await assert.rejects(printer.printImageAsLabel("a.png"), /not supported/);
+});
+
+test("printImageAsLabel rejects incomplete print dimensions", async () => {
+  const incompleteHh =
+    "\x02\r\n" +
+    "  +10.0               DARKNESS\r\n" +
+    "  V84.20.18Z <-       FIRMWARE\r\n\x03\r\n";
+  const { bp, printer } = setup({ "^HH": incompleteHh });
+  let convertCalled = false;
+  bp.convert = (_r, _d, _o, ok) => {
+    convertCalled = true;
+    ok?.({});
+  };
+  await assert.rejects(
+    printer.printImageAsLabel("a.png"),
+    (e) => e === "Printer configuration incomplete: printWidth/labelLength"
+  );
+  assert.equal(convertCalled, false);
 });
 
 test("watch reports first status, changes, and offline after threshold", async () => {

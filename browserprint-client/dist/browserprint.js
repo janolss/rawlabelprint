@@ -79,11 +79,21 @@ function u(e) {
 	}
 }
 function d(e, t) {
+	if (t == null || t.length === 0) return;
+	let n;
+	try {
+		n = new URL(e);
+	} catch {
+		throw Error("Invalid URL");
+	}
+	if (!t.includes(n.origin)) throw Error(`URL origin not allowed: ${n.origin}`);
+}
+function f(e, t) {
 	try {
 		e?.(t);
 	} catch {}
 }
-function f(e, t, r) {
+function p(e, t, r) {
 	let i = n(r), a = e ?? t;
 	try {
 		a ? a(i) : console.error("BrowserPrint error (no errorCallback):", i);
@@ -91,45 +101,72 @@ function f(e, t, r) {
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/typeof.js
-function p(e) {
+function m(e) {
 	"@babel/helpers - typeof";
-	return p = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
+	return m = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
 		return typeof e;
 	} : function(e) {
 		return e && typeof Symbol == "function" && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e;
-	}, p(e);
+	}, m(e);
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPrimitive.js
-function m(e, t) {
-	if (p(e) != "object" || !e) return e;
+function h(e, t) {
+	if (m(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
 	if (n !== void 0) {
 		var r = n.call(e, t || "default");
-		if (p(r) != "object") return r;
+		if (m(r) != "object") return r;
 		throw TypeError("@@toPrimitive must return a primitive value.");
 	}
 	return (t === "string" ? String : Number)(e);
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPropertyKey.js
-function h(e) {
-	var t = m(e, "string");
-	return p(t) == "symbol" ? t : t + "";
+function g(e) {
+	var t = h(e, "string");
+	return m(t) == "symbol" ? t : t + "";
 }
 //#endregion
 //#region \0@oxc-project+runtime@0.152.0/helpers/esm/defineProperty.js
-function g(e, t, n) {
-	return (t = h(t)) in e ? Object.defineProperty(e, t, {
+function _(e, t, n) {
+	return (t = g(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
 		enumerable: !0,
 		configurable: !0,
 		writable: !0
 	}) : e[t] = n, e;
 }
-//#endregion
-//#region src/device.ts
-function _(e) {
+var v = new TextEncoder();
+function y(e) {
+	return e.uid && e.uid.length > 0 ? e.uid : `${e.name ?? ""}|${e.connection ?? ""}|${e.deviceType ?? ""}`;
+}
+function b(e) {
+	if (typeof e != "object" || !e || Array.isArray(e)) throw Error("Invalid device info from Browser Print agent");
+	let t = e;
+	for (let e of [
+		"name",
+		"deviceType",
+		"connection",
+		"uid",
+		"provider",
+		"manufacturer"
+	]) {
+		let n = t[e];
+		if (n !== void 0 && typeof n != "string") throw Error(`Invalid device info field: ${e}`);
+	}
+	if (t.version !== void 0 && typeof t.version != "number") throw Error("Invalid device info field: version");
+	return {
+		name: t.name,
+		deviceType: t.deviceType,
+		connection: t.connection,
+		uid: t.uid,
+		version: t.version,
+		provider: t.provider,
+		manufacturer: t.manufacturer
+	};
+}
+function x(e) {
 	return {
 		name: e.name,
 		uid: e.uid,
@@ -140,10 +177,10 @@ function _(e) {
 		manufacturer: e.manufacturer
 	};
 }
-function v(e, t) {
+function S(e, t) {
 	return class {
 		constructor(e) {
-			g(this, "name", void 0), g(this, "deviceType", void 0), g(this, "connection", void 0), g(this, "uid", void 0), g(this, "version", void 0), g(this, "provider", void 0), g(this, "manufacturer", void 0), g(this, "readRetries", void 0), g(this, "sendErrorCallback", () => {}), g(this, "sendFinishedCallback", () => {}), g(this, "readErrorCallback", () => {}), g(this, "readFinishedCallback", () => {}), this.name = e.name, this.deviceType = e.deviceType, this.connection = e.connection, this.uid = e.uid, this.version = e.version ?? 2, this.provider = e.provider, this.manufacturer = e.manufacturer, this.readRetries = +(this.connection === "bluetooth");
+			_(this, "name", void 0), _(this, "deviceType", void 0), _(this, "connection", void 0), _(this, "uid", void 0), _(this, "version", void 0), _(this, "provider", void 0), _(this, "manufacturer", void 0), _(this, "readRetries", void 0), _(this, "sendErrorCallback", () => {}), _(this, "sendFinishedCallback", () => {}), _(this, "readErrorCallback", () => {}), _(this, "readFinishedCallback", () => {}), this.name = e.name, this.deviceType = e.deviceType, this.connection = e.connection, this.uid = e.uid, this.version = e.version ?? 2, this.provider = e.provider, this.manufacturer = e.manufacturer, this.readRetries = +(this.connection === "bluetooth");
 		}
 		send(n, i, a) {
 			let o = i ?? this.sendFinishedCallback, s = a ?? this.sendErrorCallback;
@@ -151,21 +188,28 @@ function v(e, t) {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					device: _(this),
+					device: x(this),
 					data: n
 				})
-			})).then((e) => d(o, e)).catch((t) => f(s, e.defaultErrorCallback, t));
+			})).then((e) => f(o, e)).catch((t) => p(s, e.defaultErrorCallback, t));
 		}
 		sendUrl(n, i, a, o) {
-			let s = i ?? this.sendFinishedCallback, l = a ?? this.sendErrorCallback, u = {
-				device: _(this),
+			let s = i ?? this.sendFinishedCallback, l = a ?? this.sendErrorCallback;
+			try {
+				d(n, e.allowedUrlOrigins);
+			} catch (t) {
+				p(l, e.defaultErrorCallback, t);
+				return;
+			}
+			let u = {
+				device: x(this),
 				url: n
 			};
 			o != null && (u.options = o), c(`${t}write`, r(e.debug, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(u)
-			})).then((e) => d(s, e)).catch((t) => f(l, e.defaultErrorCallback, t));
+			})).then((e) => f(s, e)).catch((t) => p(l, e.defaultErrorCallback, t));
 		}
 		sendFile(n, i, a) {
 			if (typeof n == "string") {
@@ -173,10 +217,10 @@ function v(e, t) {
 				return;
 			}
 			let o = i ?? e.defaultSuccessCallback, s = a ?? e.defaultErrorCallback, l = new FormData();
-			l.append("json", JSON.stringify({ device: _(this) })), l.append("blob", n), c(`${t}write`, r(e.debug, {
+			l.append("json", JSON.stringify({ device: x(this) })), l.append("blob", n), c(`${t}write`, r(e.debug, {
 				method: "POST",
 				body: l
-			})).then((e) => d(o, e)).catch((t) => f(s, e.defaultErrorCallback, t));
+			})).then((e) => f(o, e)).catch((t) => p(s, e.defaultErrorCallback, t));
 		}
 		convertAndSendFile(t, n, r, i) {
 			let a = { ...i ?? {} };
@@ -187,21 +231,25 @@ function v(e, t) {
 			c(`${t}read`, r(e.debug, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ device: _(this) })
-			})).then((e) => d(a, e)).catch((t) => f(o, e.defaultErrorCallback, t));
+				body: JSON.stringify({ device: x(this) })
+			})).then((e) => f(a, e)).catch((t) => p(o, e.defaultErrorCallback, t));
 		}
-		readUntilStringReceived(e, t, n, r, i = "") {
-			let a = r ?? this.readRetries, o = t ?? this.readFinishedCallback, s = n ?? this.readErrorCallback;
-			this.read((t) => {
-				let n = a;
-				if (t && t.length !== 0) n = 0;
-				else if (n <= 0) {
-					d(o, i);
+		readUntilStringReceived(t, n, r, i, a = "") {
+			let o = i ?? this.readRetries, s = n ?? this.readFinishedCallback, c = r ?? this.readErrorCallback;
+			this.read((n) => {
+				let r = o;
+				if (n && n.length !== 0) r = 0;
+				else if (r <= 0) {
+					f(s, a);
 					return;
 				}
-				let r = i + t;
-				e !== "" && r.includes(e) ? d(o, r) : this.readUntilStringReceived(e, o, s, n - 1, r);
-			}, s);
+				let i = a + n;
+				if (v.encode(i).byteLength > 2097152) {
+					p(c, e.defaultErrorCallback, "Read buffer exceeded maximum size");
+					return;
+				}
+				t !== "" && i.includes(t) ? f(s, i) : this.readUntilStringReceived(t, s, c, r - 1, i);
+			}, c);
 		}
 		readAllAvailable(e, t, n) {
 			this.readUntilStringReceived("", e, t, n);
@@ -225,22 +273,19 @@ function v(e, t) {
 }
 //#endregion
 //#region src/api.ts
-function y(e) {
-	return e.uid && e.uid.length > 0 ? e.uid : `${e.name ?? ""}|${e.connection ?? ""}|${e.deviceType ?? ""}`;
-}
-function b(e) {
+function C(e) {
 	return e.length < 3 ? "" : e.substring(e.length - 3);
 }
-function x(e) {
+function w(e) {
 	return e.toLowerCase().replace("image/", "").replace("application/", "").replace("x-ms-", "");
 }
-function S(e = {}) {
+function T(e = {}) {
 	let n = typeof e == "string" ? { baseUrl: e } : e, i = n.baseUrl ?? t(), a = {};
-	a.debug = n.debug ?? !1;
+	a.debug = n.debug ?? !1, a.allowedUrlOrigins = n.allowedUrlOrigins ?? null;
 	let o = /* @__PURE__ */ new Map();
 	return a.defaultSuccessCallback = () => {}, a.defaultErrorCallback = () => {}, a.ApplicationConfiguration = class {
 		constructor() {
-			g(this, "application", {
+			_(this, "application", {
 				version: "1.2.0.3",
 				build_number: 3,
 				api_level: 2,
@@ -248,33 +293,33 @@ function S(e = {}) {
 				supportedConversions: {}
 			});
 		}
-	}, a.Device = v(a, i), a.getLocalDevices = (e, t, n) => {
+	}, a.Device = S(a, i), a.getLocalDevices = (e, t, n) => {
 		c(`${i}available`, r(a.debug, { method: "GET" })).then((t) => {
 			let r = u(t);
 			for (let e of Object.keys(r)) {
 				let t = r[e];
-				Array.isArray(t) && (r[e] = t.map((e) => new a.Device(e)));
+				Array.isArray(t) && (r[e] = t.map((e) => new a.Device(b(e))));
 			}
-			n === void 0 ? d(e, r) : d(e, Array.isArray(r[n]) ? r[n] : []);
-		}).catch((e) => f(t, a.defaultErrorCallback, e));
+			n === void 0 ? f(e, r) : f(e, Array.isArray(r[n]) ? r[n] : []);
+		}).catch((e) => p(t, a.defaultErrorCallback, e));
 	}, a.getDefaultDevice = (e, t, n) => {
 		let o = "default";
 		e != null && (o = `default?type=${encodeURIComponent(e)}`), c(`${i}${o}`, r(a.debug, { method: "GET" })).then((e) => {
 			if (e === "") {
-				d(t, null);
+				f(t, null);
 				return;
 			}
-			let n = u(e);
-			d(t, new a.Device(n));
-		}).catch((e) => f(n, a.defaultErrorCallback, e));
+			let n = b(u(e));
+			f(t, new a.Device(n));
+		}).catch((e) => p(n, a.defaultErrorCallback, e));
 	}, a.getApplicationConfiguration = (e, t) => {
 		c(`${i}config`, r(a.debug, { method: "GET" })).then((t) => {
 			if (t === "") {
-				d(e, null);
+				f(e, null);
 				return;
 			}
-			d(e, u(t));
-		}).catch((e) => f(t, a.defaultErrorCallback, e));
+			f(e, u(t));
+		}).catch((e) => p(t, a.defaultErrorCallback, e));
 	}, a.readOnInterval = (e, t, n) => {
 		let r = n;
 		(r === void 0 || r === 0) && (r = 1);
@@ -282,7 +327,7 @@ function S(e = {}) {
 		a.stopReadOnInterval(e);
 		let s = { stopped: !1 }, c = () => {
 			s.stopped || e.read((e) => {
-				s.stopped || o.get(i) !== s || (d(t, e), s.timer = setTimeout(c, r));
+				s.stopped || o.get(i) !== s || (f(t, e), s.timer = setTimeout(c, r));
 			}, () => {
 				s.stopped || o.get(i) !== s || (s.timer = setTimeout(c, r));
 			});
@@ -296,81 +341,93 @@ function S(e = {}) {
 			e !== "" && (t.value = e, r?.());
 		}, n);
 	}, a.loadFileFromUrl = (e, t, n) => {
+		try {
+			d(e, a.allowedUrlOrigins);
+		} catch (e) {
+			p(n, a.defaultErrorCallback, e);
+			return;
+		}
 		l(e, { debug: a.debug }).then((e) => {
-			t && d(t, e);
-		}).catch((e) => f(n, a.defaultErrorCallback, e));
+			t && f(t, e);
+		}).catch((e) => p(n, a.defaultErrorCallback, e));
 	}, a.convert = (e, t, n, o, s) => {
 		if (!e) {
-			f(s, a.defaultErrorCallback, "Resource not specified");
+			p(s, a.defaultErrorCallback, "Resource not specified");
 			return;
 		}
 		if (typeof e == "string") {
 			let r = { ...n ?? {} };
 			a.loadFileFromUrl(e, (n) => {
-				r.fromFormat || (r.fromFormat = b(e)), a.convert(n, t, r, o, s);
+				r.fromFormat || (r.fromFormat = C(e)), a.convert(n, t, r, o, s);
 			}, s);
 			return;
 		}
 		let l = { ...n ?? {} };
-		e.type && (e.type.startsWith("image/") || e.type.startsWith("application/")) && (l.fromFormat = x(e.type));
-		let p = {};
-		l != null && (p.options = l), t && (p.device = _(t));
+		e.type && (e.type.startsWith("image/") || e.type.startsWith("application/")) && (l.fromFormat = w(e.type));
+		let d = {};
+		l != null && (d.options = l), t && (d.device = x(t));
 		let m = new FormData();
-		m.append("json", JSON.stringify(p)), m.append("blob", e), c(`${i}convert`, r(a.debug, {
+		m.append("json", JSON.stringify(d)), m.append("blob", e), c(`${i}convert`, r(a.debug, {
 			method: "POST",
 			body: m
 		})).then((e) => {
-			o && d(o, u(e));
-		}).catch((e) => f(s, a.defaultErrorCallback, e));
+			o && f(o, u(e));
+		}).catch((e) => p(s, a.defaultErrorCallback, e));
 	}, a.scanImage = (e, t, n, o) => {
 		if (!e) {
-			f(o, a.defaultErrorCallback, "Resource not specified");
+			p(o, a.defaultErrorCallback, "Resource not specified");
 			return;
 		}
 		if (typeof e == "string") {
 			let r = { ...t ?? {} };
 			a.loadFileFromUrl(e, (t) => {
-				r.format || (r.format = b(e)), a.scanImage(t, r, n, o);
+				r.format || (r.format = C(e)), a.scanImage(t, r, n, o);
 			}, o);
 			return;
 		}
 		let s = { ...t ?? {} };
-		e.type && (e.type.startsWith("image/") || e.type.startsWith("application/")) && (s.format = x(e.type));
+		e.type && (e.type.startsWith("image/") || e.type.startsWith("application/")) && (s.format = w(e.type));
 		let l = new FormData();
 		l.append("json", JSON.stringify({ options: s })), l.append("blob", e), c(`${i}convert/scan`, r(a.debug, {
 			method: "POST",
 			body: l
 		})).then((e) => {
-			n && d(n, u(e));
-		}).catch((e) => f(o, a.defaultErrorCallback, e));
+			n && f(n, u(e));
+		}).catch((e) => p(o, a.defaultErrorCallback, e));
 	}, a;
 }
-function C(e) {
-	return e.length > 1 && e.charAt(0) === "" && e.charAt(e.length - 1) === "";
+//#endregion
+//#region src/zebra.ts
+function E(e, t) {
+	if (/["\x00-\x1f\x7f]/.test(e)) throw Error(`Invalid SGD ${t}`);
 }
-function w(e) {
+var D = "", O = "", k = "Conversion is not supported by this Browser Print agent";
+function A(e) {
+	return e.length > 1 && e.charAt(0) === D && e.charAt(e.length - 1) === O;
+}
+function j(e) {
 	return typeof e == "string" ? e : e instanceof Error ? e.message : String(e);
 }
-function T(e) {
-	return e.split("").map((e) => e.replace(/^[\s\x02]+/, "").trim()).filter((e) => e.length > 0).map((e) => e.split(",").map((e) => e.trim()));
+function M(e) {
+	return e.split(O).map((e) => e.replace(/^[\s\x02]+/, "").trim()).filter((e) => e.length > 0).map((e) => e.split(",").map((e) => e.trim()));
 }
-function E(e, t) {
+function N(e, t) {
 	return e?.[t] === "1";
 }
-function D(e, t) {
+function P(e, t) {
 	let n = parseInt(e?.[t] ?? "", 10);
 	return Number.isNaN(n) ? void 0 : n;
 }
-var O = class {
+var F = class {
 	constructor(e) {
-		g(this, "raw", void 0), g(this, "offline", !1), g(this, "paperOut", !1), g(this, "paused", !1), g(this, "headOpen", !1), g(this, "ribbonOut", !1), g(this, "labelLengthDots", void 0), g(this, "formatsInBuffer", void 0), g(this, "bufferFull", !1), g(this, "partialFormatInProgress", !1), g(this, "corruptRam", !1), g(this, "underTemperature", !1), g(this, "overTemperature", !1), g(this, "labelsRemaining", void 0), this.raw = e ?? "";
+		_(this, "raw", void 0), _(this, "offline", !1), _(this, "paperOut", !1), _(this, "paused", !1), _(this, "headOpen", !1), _(this, "ribbonOut", !1), _(this, "labelLengthDots", void 0), _(this, "formatsInBuffer", void 0), _(this, "bufferFull", !1), _(this, "partialFormatInProgress", !1), _(this, "corruptRam", !1), _(this, "underTemperature", !1), _(this, "overTemperature", !1), _(this, "labelsRemaining", void 0), this.raw = e ?? "";
 		let t = this.raw.trim();
-		if (!C(t)) {
+		if (!A(t)) {
 			this.offline = !0;
 			return;
 		}
-		let [n, r] = T(t);
-		this.paperOut = E(n, 1), this.paused = E(n, 2), this.labelLengthDots = D(n, 3), this.formatsInBuffer = D(n, 4), this.bufferFull = E(n, 5), this.partialFormatInProgress = E(n, 7), this.corruptRam = E(n, 9), this.underTemperature = E(n, 10), this.overTemperature = E(n, 11), this.headOpen = E(r, 2), this.ribbonOut = E(r, 3), this.labelsRemaining = D(r, 8);
+		let [n, r] = M(t);
+		this.paperOut = N(n, 1), this.paused = N(n, 2), this.labelLengthDots = P(n, 3), this.formatsInBuffer = P(n, 4), this.bufferFull = N(n, 5), this.partialFormatInProgress = N(n, 7), this.corruptRam = N(n, 9), this.underTemperature = N(n, 10), this.overTemperature = N(n, 11), this.headOpen = N(r, 2), this.ribbonOut = N(r, 3), this.labelsRemaining = P(r, 8);
 	}
 	isFlagSet(e) {
 		return this.raw.charAt(e) === "1";
@@ -381,21 +438,21 @@ var O = class {
 	getMessage() {
 		return this.isPrinterReady() ? "Ready" : this.offline ? "Offline" : this.paperOut ? "Paper Out" : this.headOpen ? "Head Open" : this.ribbonOut ? "Ribbon Out" : this.paused ? "Paused" : "Ready";
 	}
-}, k = class {
+}, I = class {
 	constructor(e) {
-		if (g(this, "raw", void 0), g(this, "model", void 0), g(this, "firmware", void 0), g(this, "extra", void 0), !e) throw Error("Invalid Response");
+		if (_(this, "raw", void 0), _(this, "model", void 0), _(this, "firmware", void 0), _(this, "extra", void 0), !e) throw Error("Invalid Response");
 		this.raw = e;
 		let t = e.trim();
-		if (!C(t)) throw Error("Invalid Response");
+		if (!A(t)) throw Error("Invalid Response");
 		let n = t.slice(1, -1).split(",");
 		this.model = (n[0] ?? "").trim(), this.firmware = (n[1] ?? "").trim(), this.extra = n.slice(2).map((e) => e.trim());
 	}
-}, A = class {
+}, L = class {
 	constructor(e) {
-		if (g(this, "raw", void 0), g(this, "settings", {}), g(this, "darkness", void 0), g(this, "printSpeed", void 0), g(this, "printWidth", void 0), g(this, "labelLength", void 0), g(this, "firmwareVersion", void 0), g(this, "linkOSVersion", void 0), !e) throw Error("Invalid Response");
+		if (_(this, "raw", void 0), _(this, "settings", {}), _(this, "darkness", void 0), _(this, "printSpeed", void 0), _(this, "printWidth", void 0), _(this, "labelLength", void 0), _(this, "firmwareVersion", void 0), _(this, "linkOSVersion", void 0), !e) throw Error("Invalid Response");
 		let t = e.trim();
-		if (this.raw = t, !C(t)) throw Error("Invalid Response");
-		for (let e of t.replace("", "").replace("", "").split("\n")) {
+		if (this.raw = t, !A(t)) throw Error("Invalid Response");
+		for (let e of t.replace(D, "").replace(O, "").split("\n")) {
 			let t = e.trim();
 			if (t === "") continue;
 			let n = t.substring(0, 20).trim(), r = t.substring(20).trim();
@@ -409,20 +466,20 @@ var O = class {
 		let n = this.settings;
 		this.darkness = parseFloat(n.DARKNESS), this.printSpeed = parseInt((n["PRINT SPEED"] ?? "").replace("IPS", "").trim(), 10), this.printWidth = parseInt(n["PRINT WIDTH"], 10), this.labelLength = parseInt(n["LABEL LENGTH"], 10), this.firmwareVersion = (n.FIRMWARE ?? "").replace("<-", "").trim(), this.linkOSVersion = Object.prototype.hasOwnProperty.call(n, "LINK-OS VERSION") ? n["LINK-OS VERSION"] : "0";
 	}
-}, j = 5, M = 1e3;
-function N(e, t, n, r) {
+}, R = 5, z = 1e3;
+function B(e, t, n, r) {
 	if (!t && !n) return new Promise((t, n) => e(t, n));
-	e((e) => t?.(e), (e) => f(n, r, e));
+	e((e) => f(t, e), (e) => p(n, r, e));
 }
-function P(e, t = {}) {
+function V(e, t = {}) {
 	let n = t.pollIntervalMs ?? 2e3, r = e.Device;
 	class i extends r {
 		constructor(e, t = {}) {
-			super(e), g(this, "configuration", void 0), g(this, "queue", []), t.autoLoadConfiguration !== !1 && this.loadConfigurationInBackground(1);
+			super(e), _(this, "configuration", void 0), _(this, "queue", []), t.autoLoadConfiguration !== !1 && this.loadConfigurationInBackground(1);
 		}
 		loadConfigurationInBackground(e) {
 			this.configuration || this.getConfiguration().catch(() => {
-				e >= j || setTimeout(() => this.loadConfigurationInBackground(e + 1), M * 2 ** (e - 1)).unref?.();
+				e >= R || setTimeout(() => this.loadConfigurationInBackground(e + 1), z * 2 ** (e - 1)).unref?.();
 			});
 		}
 		clearRequestQueue() {
@@ -464,51 +521,63 @@ function P(e, t = {}) {
 				try {
 					n({ value: e.parse ? e.parse(t) : t });
 				} catch (e) {
-					n({ error: w(e) });
+					n({ error: j(e) });
 				}
 			}, i = (e) => n({ error: e });
-			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, "", r, i) : this.sendThenReadAllAvailable(e.command, r, i);
+			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, O, r, i) : this.sendThenReadAllAvailable(e.command, r, i);
 		}
 		getStatus(t, n) {
-			return N((e, t) => {
-				this.enqueue("status", "~hs\r\n", (e) => new O(e)).then((t) => e(t), t);
+			return B((e, t) => {
+				this.enqueue("status", "~hs\r\n", (e) => new F(e)).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		isPrinterReady(t, n) {
-			return N((e, t) => {
+			return B((e, t) => {
 				this.getStatus().then((n) => n.isPrinterReady() ? e(n.getMessage()) : t(n.getMessage()), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getInfo(t, n) {
-			return N((e, t) => {
-				this.enqueue("info", "~hi\r\n", (e) => new k(e)).then((t) => e(t), t);
+			return B((e, t) => {
+				this.enqueue("info", "~hi\r\n", (e) => new I(e)).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getConfiguration(t, n) {
-			return N((e, t) => {
+			return B((e, t) => {
 				this.enqueue("config", "^XA^HH^XZ", (e) => {
-					let t = new A(e);
+					let t = new L(e);
 					return this.configuration = t, t;
 				}).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getSGD(t, n, r) {
-			return N((e, n) => {
+			return B((e, n) => {
+				try {
+					E(t, "name");
+				} catch (e) {
+					n(j(e));
+					return;
+				}
 				this.enqueue("sgd", `! U1 getvar "${t}"\r\n`).then((t) => e(t), n);
 			}, n, r, e.defaultErrorCallback);
 		}
 		setSGD(t, n, r, i) {
-			return N((e, r) => {
+			return B((e, r) => {
+				try {
+					E(t, "name"), E(n, "value");
+				} catch (e) {
+					r(j(e));
+					return;
+				}
 				this.enqueue("set", `! U1 setvar "${t}" "${n}"\r\n`).then((t) => e(t), r);
 			}, r, i, e.defaultErrorCallback);
 		}
 		setThenGetSGD(t, n, r, i) {
-			return N((e, r) => {
+			return B((e, r) => {
 				this.setSGD(t, n).then(() => this.getSGD(t).then(e, r), r);
 			}, r, i, e.defaultErrorCallback);
 		}
 		query(t, n, r) {
-			return N((e, n) => {
+			return B((e, n) => {
 				this.enqueue("query", t).then((t) => e(t), n);
 			}, n, r, e.defaultErrorCallback);
 		}
@@ -516,16 +585,23 @@ function P(e, t = {}) {
 			return this.configuration ?? await this.getConfiguration();
 		}
 		convertWith(t, n, r, i, a) {
-			return N((i, a) => {
+			return B((i, a) => {
 				this.ensureConfiguration().then((o) => {
 					let s = {
 						...r ?? {},
 						action: t
 					};
-					t === "print" && (s.fitTo = {
-						width: o.printWidth,
-						height: o.labelLength
-					}), e.convert(n, this, s, i, (e) => a(e || "Conversion is not supported by this Browser Print agent"));
+					if (t === "print") {
+						if (!Number.isFinite(o.printWidth) || o.printWidth <= 0 || !Number.isFinite(o.labelLength) || o.labelLength <= 0) {
+							a("Printer configuration incomplete: printWidth/labelLength");
+							return;
+						}
+						s.fitTo = {
+							width: o.printWidth,
+							height: o.labelLength
+						};
+					}
+					e.convert(n, this, s, i, (e) => a(e || k));
 				}, a);
 			}, i, a, e.defaultErrorCallback);
 		}
@@ -539,10 +615,10 @@ function P(e, t = {}) {
 			return this.convertWith("store", e, t, n, r);
 		}
 	}
-	g(i, "Status", O), g(i, "Info", k), g(i, "Configuration", A);
+	_(i, "Status", F), _(i, "Info", I), _(i, "Configuration", L);
 	let a = /* @__PURE__ */ new Map(), o;
 	function s(e) {
-		return e.uid ?? `${e.name ?? ""}|${e.connection ?? ""}`;
+		return y(e);
 	}
 	function c(e, t, n) {
 		if (a.get(t) !== e) return;
@@ -558,7 +634,7 @@ function P(e, t = {}) {
 		for (let [e, t] of a) t.inFlight || (t.inFlight = !0, t.printer.getStatus().then((n) => {
 			t.inFlight = !1, c(t, e, n);
 		}, () => {
-			t.inFlight = !1, c(t, e, new O(""));
+			t.inFlight = !1, c(t, e, new F(""));
 		}));
 	}
 	return {
@@ -581,17 +657,17 @@ function P(e, t = {}) {
 }
 //#endregion
 //#region src/index.ts
-var F = S(), I = P(F);
-if (Object.assign(F, {
-	createBrowserPrint: S,
+var H = T(), U = V(H);
+if (Object.assign(H, {
+	createBrowserPrint: T,
 	DEFAULT_TIMEOUT_MS: e,
 	resolveBaseUrl: t,
-	Zebra: I
-}), typeof globalThis < "u") {
+	Zebra: U
+}), typeof document < "u") {
 	let e = globalThis;
-	e.BrowserPrint = F, e.Zebra = I;
+	e.BrowserPrint ?? (e.BrowserPrint = H), e.Zebra ?? (e.Zebra = U);
 }
 //#endregion
-export { F as default };
+export { H as default };
 
 //# sourceMappingURL=browserprint.js.map

@@ -31,6 +31,11 @@ export declare function requestBlob(url: string, options?: {
 }): Promise<Blob>;
 /** Safe JSON.parse that throws a clear Error. */
 export declare function parseJson<T>(text: string): T;
+/**
+ * When `allowedOrigins` is set and non-empty, require `url` to parse and match
+ * one of those origins exactly. No restriction when unset/empty (drop-in default).
+ */
+export declare function assertUrlAllowed(url: string, allowedOrigins: string[] | null | undefined): void;
 /** Invoke a success callback, swallowing consumer throws. */
 export declare function invokeSuccess<T>(cb: ((value: T) => void) | undefined, value: T): void;
 /** Invoke an error callback with a string message. */

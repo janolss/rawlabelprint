@@ -194,6 +194,28 @@ export function parseJson<T>(text: string): T {
   }
 }
 
+/**
+ * When `allowedOrigins` is set and non-empty, require `url` to parse and match
+ * one of those origins exactly. No restriction when unset/empty (drop-in default).
+ */
+export function assertUrlAllowed(
+  url: string,
+  allowedOrigins: string[] | null | undefined
+): void {
+  if (allowedOrigins == null || allowedOrigins.length === 0) {
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+  if (!allowedOrigins.includes(parsed.origin)) {
+    throw new Error(`URL origin not allowed: ${parsed.origin}`);
+  }
+}
+
 /** Invoke a success callback, swallowing consumer throws. */
 export function invokeSuccess<T>(
   cb: ((value: T) => void) | undefined,

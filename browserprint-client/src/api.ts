@@ -1,5 +1,6 @@
-import { createDeviceClass, devicePayload } from "./device";
+import { asDeviceInfo, createDeviceClass, deviceKey, devicePayload } from "./device";
 import {
+  assertUrlAllowed,
   invokeError,
   invokeSuccess,
   parseJson,
@@ -13,20 +14,12 @@ import type {
   BindableField,
   BrowserPrintAPI,
   ConvertOptions,
-  DeviceInfo,
   DeviceLike,
   ErrorCallback,
   LocalDevicesMap,
   ScanOptions,
   SuccessCallback,
 } from "./types";
-
-function intervalKey(device: DeviceLike): string {
-  if (device.uid && device.uid.length > 0) {
-    return device.uid;
-  }
-  return `${device.name ?? ""}|${device.connection ?? ""}|${device.deviceType ?? ""}`;
-}
 
 function extensionHint(url: string): string {
   if (url.length < 3) {
@@ -46,6 +39,8 @@ function mimeToFormat(type: string): string {
 export type CreateBrowserPrintOptions = {
   baseUrl?: string;
   debug?: boolean;
+  /** Opt-in origin allowlist for URL fetches / sendUrl. Null/empty = unrestricted. */
+  allowedUrlOrigins?: string[] | null;
 };
 
 export function createBrowserPrint(
@@ -58,6 +53,7 @@ export function createBrowserPrint(
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const api = {} as BrowserPrintAPI;
   api.debug = options.debug ?? false;
+  api.allowedUrlOrigins = options.allowedUrlOrigins ?? null;
   const readIntervals = new Map<
     string,
     { stopped: boolean; timer?: ReturnType<typeof setTimeout> }
@@ -91,9 +87,7 @@ export function createBrowserPrint(
         for (const key of Object.keys(response)) {
           const value = response[key];
           if (Array.isArray(value)) {
-            response[key] = value.map(
-              (item) => new api.Device(item as DeviceInfo)
-            );
+            response[key] = value.map((item) => new api.Device(asDeviceInfo(item)));
           }
         }
         if (deviceType === undefined) {
@@ -125,7 +119,7 @@ export function createBrowserPrint(
           invokeSuccess(finished, null);
           return;
         }
-        const info = parseJson<DeviceInfo>(text);
+        const info = asDeviceInfo(parseJson<unknown>(text));
         invokeSuccess(finished, new api.Device(info));
       })
       .catch((err) =>
@@ -159,7 +153,7 @@ export function createBrowserPrint(
     if (delay === undefined || delay === 0) {
       delay = 1;
     }
-    const key = intervalKey(device);
+    const key = deviceKey(device);
     api.stopReadOnInterval(device);
     const interval = { stopped: false } as {
       stopped: boolean;
@@ -186,7 +180,7 @@ export function createBrowserPrint(
   };
 
   api.stopReadOnInterval = (device: DeviceLike): void => {
-    const key = intervalKey(device);
+    const key = deviceKey(device);
     const interval = readIntervals.get(key);
     if (interval !== undefined) {
       interval.stopped = true;
@@ -222,6 +216,12 @@ export function createBrowserPrint(
     finished?: SuccessCallback<Blob>,
     error?: ErrorCallback
   ): void => {
+    try {
+      assertUrlAllowed(url, api.allowedUrlOrigins);
+    } catch (err) {
+      invokeError(error, api.defaultErrorCallback, err);
+      return;
+    }
     void requestBlob(url, { debug: api.debug })
       .then((blob) => {
         if (finished) {

@@ -1,7 +1,7 @@
 {
   "name": "@rawlabelprint/browserprint-client",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "type": "module",
   "description": "Drop-in BrowserPrint-3.1.250-compatible client for RawLabelPrint",

@@ -139,6 +139,84 @@ test("invalid JSON from getLocalDevices hits error callback", async () => {
   assert.match(message, /Invalid JSON/);
 });
 
+test("malformed device entries from getLocalDevices hit error callback", async () => {
+  const bp = createBrowserPrint(BASE);
+  mockFetch(() => Response.json({ printer: ["not-a-device"] }));
+
+  const message = await once<string>((resolve) => {
+    bp.getLocalDevices(
+      () => resolve("unexpected-success"),
+      (err) => resolve(err)
+    );
+  });
+
+  assert.match(message, /Invalid device info/);
+});
+
+test("loadFileFromUrl and sendUrl honor allowedUrlOrigins when set", async () => {
+  const bp = createBrowserPrint({
+    baseUrl: BASE,
+    allowedUrlOrigins: ["https://cdn.example.com"],
+  });
+  const calls = mockFetch(() => new Response("ok", { status: 200 }));
+  const device = new bp.Device(sampleDevice);
+
+  const blockedLoad = await once<string>((resolve) => {
+    bp.loadFileFromUrl(
+      "https://evil.example.com/a.zpl",
+      () => resolve("ok"),
+      (err) => resolve(err)
+    );
+  });
+  assert.match(blockedLoad, /URL origin not allowed/);
+
+  const allowedLoad = await once<Blob>((resolve, reject) => {
+    bp.loadFileFromUrl(
+      "https://cdn.example.com/a.zpl",
+      resolve,
+      (e) => reject(new Error(e))
+    );
+  });
+  assert.ok(allowedLoad instanceof Blob);
+
+  const blockedSend = await once<string>((resolve) => {
+    device.sendUrl(
+      "http://127.0.0.1/secret",
+      () => resolve("ok"),
+      (err) => resolve(err)
+    );
+  });
+  assert.match(blockedSend, /URL origin not allowed/);
+
+  await once<string>((resolve, reject) => {
+    device.sendUrl(
+      "https://cdn.example.com/label.zpl",
+      resolve,
+      (e) => reject(new Error(e))
+    );
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://cdn.example.com/a.zpl");
+  assert.equal(calls[1].url, `${BASE}write`);
+});
+
+test("without allowedUrlOrigins, loadFileFromUrl accepts any URL", async () => {
+  const bp = createBrowserPrint(BASE);
+  assert.equal(bp.allowedUrlOrigins, null);
+  const calls = mockFetch(() => new Response("bytes", { status: 200 }));
+
+  await once<Blob>((resolve, reject) => {
+    bp.loadFileFromUrl(
+      "https://anywhere.example/file.bin",
+      resolve,
+      (e) => reject(new Error(e))
+    );
+  });
+
+  assert.equal(calls[0].url, "https://anywhere.example/file.bin");
+});
+
 test("device.send posts JSON to /write", async () => {
   const bp = createBrowserPrint(BASE);
   const calls = mockFetch(() => new Response("ok", { status: 200 }));
