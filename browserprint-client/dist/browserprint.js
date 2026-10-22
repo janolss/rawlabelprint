@@ -397,37 +397,40 @@ function T(e = {}) {
 	}, a;
 }
 //#endregion
-//#region src/zebra.ts
+//#region src/zebra/helpers.ts
 function E(e, t) {
 	if (/["\x00-\x1f\x7f]/.test(e)) throw Error(`Invalid SGD ${t}`);
 }
-var D = "", O = "", k = "Conversion is not supported by this Browser Print agent";
-function A(e) {
-	return e.length > 1 && e.charAt(0) === D && e.charAt(e.length - 1) === O;
-}
-function j(e) {
+function D(e) {
 	return typeof e == "string" ? e : e instanceof Error ? e.message : String(e);
 }
-function M(e) {
-	return e.split(O).map((e) => e.replace(/^[\s\x02]+/, "").trim()).filter((e) => e.length > 0).map((e) => e.split(",").map((e) => e.trim()));
+function O(e, t, n, r) {
+	if (!t && !n) return new Promise((t, n) => e(t, n));
+	e((e) => f(t, e), (e) => p(n, r, e));
 }
-function N(e, t) {
+function k(e) {
+	return e.length > 1 && e.charAt(0) === "" && e.charAt(e.length - 1) === "";
+}
+function A(e) {
+	return e.split("").map((e) => e.replace(/^[\s\x02]+/, "").trim()).filter((e) => e.length > 0).map((e) => e.split(",").map((e) => e.trim()));
+}
+function j(e, t) {
 	return e?.[t] === "1";
 }
-function P(e, t) {
+function M(e, t) {
 	let n = parseInt(e?.[t] ?? "", 10);
 	return Number.isNaN(n) ? void 0 : n;
 }
-var F = class {
+var N = class {
 	constructor(e) {
 		_(this, "raw", void 0), _(this, "offline", !1), _(this, "paperOut", !1), _(this, "paused", !1), _(this, "headOpen", !1), _(this, "ribbonOut", !1), _(this, "labelLengthDots", void 0), _(this, "formatsInBuffer", void 0), _(this, "bufferFull", !1), _(this, "partialFormatInProgress", !1), _(this, "corruptRam", !1), _(this, "underTemperature", !1), _(this, "overTemperature", !1), _(this, "labelsRemaining", void 0), this.raw = e ?? "";
 		let t = this.raw.trim();
-		if (!A(t)) {
+		if (!k(t)) {
 			this.offline = !0;
 			return;
 		}
-		let [n, r] = M(t);
-		this.paperOut = N(n, 1), this.paused = N(n, 2), this.labelLengthDots = P(n, 3), this.formatsInBuffer = P(n, 4), this.bufferFull = N(n, 5), this.partialFormatInProgress = N(n, 7), this.corruptRam = N(n, 9), this.underTemperature = N(n, 10), this.overTemperature = N(n, 11), this.headOpen = N(r, 2), this.ribbonOut = N(r, 3), this.labelsRemaining = P(r, 8);
+		let [n, r] = A(t);
+		this.paperOut = j(n, 1), this.paused = j(n, 2), this.labelLengthDots = M(n, 3), this.formatsInBuffer = M(n, 4), this.bufferFull = j(n, 5), this.partialFormatInProgress = j(n, 7), this.corruptRam = j(n, 9), this.underTemperature = j(n, 10), this.overTemperature = j(n, 11), this.headOpen = j(r, 2), this.ribbonOut = j(r, 3), this.labelsRemaining = M(r, 8);
 	}
 	isFlagSet(e) {
 		return this.raw.charAt(e) === "1";
@@ -438,21 +441,21 @@ var F = class {
 	getMessage() {
 		return this.isPrinterReady() ? "Ready" : this.offline ? "Offline" : this.paperOut ? "Paper Out" : this.headOpen ? "Head Open" : this.ribbonOut ? "Ribbon Out" : this.paused ? "Paused" : "Ready";
 	}
-}, I = class {
+}, P = class {
 	constructor(e) {
 		if (_(this, "raw", void 0), _(this, "model", void 0), _(this, "firmware", void 0), _(this, "extra", void 0), !e) throw Error("Invalid Response");
 		this.raw = e;
 		let t = e.trim();
-		if (!A(t)) throw Error("Invalid Response");
+		if (!k(t)) throw Error("Invalid Response");
 		let n = t.slice(1, -1).split(",");
 		this.model = (n[0] ?? "").trim(), this.firmware = (n[1] ?? "").trim(), this.extra = n.slice(2).map((e) => e.trim());
 	}
-}, L = class {
+}, F = class {
 	constructor(e) {
 		if (_(this, "raw", void 0), _(this, "settings", {}), _(this, "darkness", void 0), _(this, "printSpeed", void 0), _(this, "printWidth", void 0), _(this, "labelLength", void 0), _(this, "firmwareVersion", void 0), _(this, "linkOSVersion", void 0), !e) throw Error("Invalid Response");
 		let t = e.trim();
-		if (this.raw = t, !A(t)) throw Error("Invalid Response");
-		for (let e of t.replace(D, "").replace(O, "").split("\n")) {
+		if (this.raw = t, !k(t)) throw Error("Invalid Response");
+		for (let e of t.replace("", "").replace("", "").split("\n")) {
 			let t = e.trim();
 			if (t === "") continue;
 			let n = t.substring(0, 20).trim(), r = t.substring(20).trim();
@@ -466,20 +469,16 @@ var F = class {
 		let n = this.settings;
 		this.darkness = parseFloat(n.DARKNESS), this.printSpeed = parseInt((n["PRINT SPEED"] ?? "").replace("IPS", "").trim(), 10), this.printWidth = parseInt(n["PRINT WIDTH"], 10), this.labelLength = parseInt(n["LABEL LENGTH"], 10), this.firmwareVersion = (n.FIRMWARE ?? "").replace("<-", "").trim(), this.linkOSVersion = Object.prototype.hasOwnProperty.call(n, "LINK-OS VERSION") ? n["LINK-OS VERSION"] : "0";
 	}
-}, R = 5, z = 1e3;
-function B(e, t, n, r) {
-	if (!t && !n) return new Promise((t, n) => e(t, n));
-	e((e) => f(t, e), (e) => p(n, r, e));
-}
-function V(e, t = {}) {
-	let n = t.pollIntervalMs ?? 2e3, r = e.Device;
-	class i extends r {
+}, I = 5, L = 1e3;
+function R(e) {
+	let t = e.Device;
+	class n extends t {
 		constructor(e, t = {}) {
 			super(e), _(this, "configuration", void 0), _(this, "queue", []), t.autoLoadConfiguration !== !1 && this.loadConfigurationInBackground(1);
 		}
 		loadConfigurationInBackground(e) {
 			this.configuration || this.getConfiguration().catch(() => {
-				e >= R || setTimeout(() => this.loadConfigurationInBackground(e + 1), z * 2 ** (e - 1)).unref?.();
+				e >= I || setTimeout(() => this.loadConfigurationInBackground(e + 1), L * 2 ** (e - 1)).unref?.();
 			});
 		}
 		clearRequestQueue() {
@@ -521,63 +520,63 @@ function V(e, t = {}) {
 				try {
 					n({ value: e.parse ? e.parse(t) : t });
 				} catch (e) {
-					n({ error: j(e) });
+					n({ error: D(e) });
 				}
 			}, i = (e) => n({ error: e });
-			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, O, r, i) : this.sendThenReadAllAvailable(e.command, r, i);
+			e.kind === "set" ? this.send(e.command, r, i) : e.kind === "status" || e.kind === "info" || e.kind === "config" ? this.sendThenReadUntilStringReceived(e.command, "", r, i) : this.sendThenReadAllAvailable(e.command, r, i);
 		}
 		getStatus(t, n) {
-			return B((e, t) => {
-				this.enqueue("status", "~hs\r\n", (e) => new F(e)).then((t) => e(t), t);
+			return O((e, t) => {
+				this.enqueue("status", "~hs\r\n", (e) => new N(e)).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		isPrinterReady(t, n) {
-			return B((e, t) => {
+			return O((e, t) => {
 				this.getStatus().then((n) => n.isPrinterReady() ? e(n.getMessage()) : t(n.getMessage()), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getInfo(t, n) {
-			return B((e, t) => {
-				this.enqueue("info", "~hi\r\n", (e) => new I(e)).then((t) => e(t), t);
+			return O((e, t) => {
+				this.enqueue("info", "~hi\r\n", (e) => new P(e)).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getConfiguration(t, n) {
-			return B((e, t) => {
+			return O((e, t) => {
 				this.enqueue("config", "^XA^HH^XZ", (e) => {
-					let t = new L(e);
+					let t = new F(e);
 					return this.configuration = t, t;
 				}).then((t) => e(t), t);
 			}, t, n, e.defaultErrorCallback);
 		}
 		getSGD(t, n, r) {
-			return B((e, n) => {
+			return O((e, n) => {
 				try {
 					E(t, "name");
 				} catch (e) {
-					n(j(e));
+					n(D(e));
 					return;
 				}
 				this.enqueue("sgd", `! U1 getvar "${t}"\r\n`).then((t) => e(t), n);
 			}, n, r, e.defaultErrorCallback);
 		}
 		setSGD(t, n, r, i) {
-			return B((e, r) => {
+			return O((e, r) => {
 				try {
 					E(t, "name"), E(n, "value");
 				} catch (e) {
-					r(j(e));
+					r(D(e));
 					return;
 				}
 				this.enqueue("set", `! U1 setvar "${t}" "${n}"\r\n`).then((t) => e(t), r);
 			}, r, i, e.defaultErrorCallback);
 		}
 		setThenGetSGD(t, n, r, i) {
-			return B((e, r) => {
+			return O((e, r) => {
 				this.setSGD(t, n).then(() => this.getSGD(t).then(e, r), r);
 			}, r, i, e.defaultErrorCallback);
 		}
 		query(t, n, r) {
-			return B((e, n) => {
+			return O((e, n) => {
 				this.enqueue("query", t).then((t) => e(t), n);
 			}, n, r, e.defaultErrorCallback);
 		}
@@ -585,7 +584,7 @@ function V(e, t = {}) {
 			return this.configuration ?? await this.getConfiguration();
 		}
 		convertWith(t, n, r, i, a) {
-			return B((i, a) => {
+			return O((i, a) => {
 				this.ensureConfiguration().then((o) => {
 					let s = {
 						...r ?? {},
@@ -601,7 +600,7 @@ function V(e, t = {}) {
 							height: o.labelLength
 						};
 					}
-					e.convert(n, this, s, i, (e) => a(e || k));
+					e.convert(n, this, s, i, (e) => a(e || "Conversion is not supported by this Browser Print agent"));
 				}, a);
 			}, i, a, e.defaultErrorCallback);
 		}
@@ -615,59 +614,72 @@ function V(e, t = {}) {
 			return this.convertWith("store", e, t, n, r);
 		}
 	}
-	_(i, "Status", F), _(i, "Info", I), _(i, "Configuration", L);
-	let a = /* @__PURE__ */ new Map(), o;
-	function s(e) {
+	return _(n, "Status", N), _(n, "Info", P), _(n, "Configuration", F), n;
+}
+//#endregion
+//#region src/zebra/watch.ts
+function z(e, t) {
+	let n = /* @__PURE__ */ new Map(), r;
+	function i(e) {
 		return y(e);
 	}
-	function c(e, t, n) {
-		if (a.get(t) !== e) return;
-		if (n.offline) {
+	function a(e, t, r) {
+		if (n.get(t) !== e) return;
+		if (r.offline) {
 			if (e.errors += 1, e.errors < e.errorsForOffline) return;
 		} else e.errors = 0;
-		let r = e.previous;
-		if (e.previous = n, r === "" || r.raw !== n.raw || r.offline !== n.offline) try {
-			e.onchange(r, n);
+		let i = e.previous;
+		if (e.previous = r, i === "" || i.raw !== r.raw || i.offline !== r.offline) try {
+			e.onchange(i, r);
 		} catch {}
 	}
-	function l() {
-		for (let [e, t] of a) t.inFlight || (t.inFlight = !0, t.printer.getStatus().then((n) => {
-			t.inFlight = !1, c(t, e, n);
+	function o() {
+		for (let [e, t] of n) t.inFlight || (t.inFlight = !0, t.printer.getStatus().then((n) => {
+			t.inFlight = !1, a(t, e, n);
 		}, () => {
-			t.inFlight = !1, c(t, e, new F(""));
+			t.inFlight = !1, a(t, e, new N(""));
 		}));
 	}
 	return {
-		Printer: i,
-		watch(e, t, r = 2) {
-			let c = e instanceof i ? e : new i(e, { autoLoadConfiguration: !1 });
-			a.set(s(e), {
-				printer: c,
+		watch(a, s, c = 2) {
+			let l = a instanceof e ? a : new e(a, { autoLoadConfiguration: !1 });
+			n.set(i(a), {
+				printer: l,
 				previous: "",
-				onchange: t,
+				onchange: s,
 				errors: 0,
-				errorsForOffline: r,
+				errorsForOffline: c,
 				inFlight: !1
-			}), o === void 0 && (o = setInterval(l, n), o.unref?.());
+			}), r === void 0 && (r = setInterval(o, t), r.unref?.());
 		},
 		stopWatching(e) {
-			a.delete(s(e)), a.size === 0 && o !== void 0 && (clearInterval(o), o = void 0);
+			n.delete(i(e)), n.size === 0 && r !== void 0 && (clearInterval(r), r = void 0);
 		}
 	};
 }
 //#endregion
+//#region src/zebra/create.ts
+function B(e, t = {}) {
+	let n = t.pollIntervalMs ?? 2e3, r = R(e), { watch: i, stopWatching: a } = z(r, n);
+	return {
+		Printer: r,
+		watch: i,
+		stopWatching: a
+	};
+}
+//#endregion
 //#region src/index.ts
-var H = T(), U = V(H);
-if (Object.assign(H, {
+var V = T(), H = B(V);
+if (Object.assign(V, {
 	createBrowserPrint: T,
 	DEFAULT_TIMEOUT_MS: e,
 	resolveBaseUrl: t,
-	Zebra: U
+	Zebra: H
 }), typeof document < "u") {
 	let e = globalThis;
-	e.BrowserPrint ?? (e.BrowserPrint = H), e.Zebra ?? (e.Zebra = U);
+	e.BrowserPrint ?? (e.BrowserPrint = V), e.Zebra ?? (e.Zebra = H);
 }
 //#endregion
-export { H as default };
+export { V as default };
 
 //# sourceMappingURL=browserprint.js.map
