@@ -4,10 +4,13 @@
 //! StatusNotifier hosts (COSMIC, GNOME AppIndicator, KDE) draw the pixmap unchanged,
 //! so the same shape is painted white when the desktop prefers a dark appearance.
 
+use std::future::poll_fn;
+use std::pin::Pin;
 use tauri::image::Image;
 use tauri::tray::TrayIcon;
 use tauri::Runtime;
-use zbus::zvariant::{OwnedValue, Value};
+use zbus::export::futures_core::stream::Stream;
+use zbus::{Connection, OwnedVariant, Variant};
 
 const APPEARANCE_NS: &str = "org.freedesktop.appearance";
 const COLOR_SCHEME_KEY: &str = "color-scheme";
@@ -27,10 +30,10 @@ enum ColorScheme {
     default_path = "/org/freedesktop/portal/desktop"
 )]
 trait PortalSettings {
-    fn read_one(&self, namespace: &str, key: &str) -> zbus::Result<OwnedValue>;
+    fn read_one(&self, namespace: &str, key: &str) -> zbus::Result<OwnedVariant>;
 
     #[zbus(signal)]
-    fn setting_changed(&self, namespace: &str, key: &str, value: OwnedValue) -> zbus::Result<()>;
+    fn setting_changed(&self, namespace: &str, key: &str, value: OwnedVariant) -> zbus::Result<()>;
 }
 
 pub fn icon(on_dark: bool) -> tauri::Result<Image<'static>> {
@@ -63,7 +66,7 @@ pub fn follow_color_scheme<R: Runtime>(tray: TrayIcon<R>) {
     if let Err(err) = std::thread::Builder::new()
         .name("tray-theme".into())
         .spawn(move || {
-            if let Err(err) = watch(tray) {
+            if let Err(err) = zbus::block_on(watch(tray)) {
                 tracing::warn!("Tray color-scheme watcher stopped: {err}");
             }
         })
@@ -72,11 +75,12 @@ pub fn follow_color_scheme<R: Runtime>(tray: TrayIcon<R>) {
     }
 }
 
-fn watch<R: Runtime>(tray: TrayIcon<R>) -> zbus::Result<()> {
-    let connection = zbus::blocking::Connection::session()?;
-    let proxy = PortalSettingsProxyBlocking::new(&connection)?;
-    let mut dark = scheme_is_dark(read_scheme(&proxy)?);
-    for signal in proxy.receive_setting_changed()? {
+async fn watch<R: Runtime>(tray: TrayIcon<R>) -> zbus::Result<()> {
+    let connection = Connection::session().await?;
+    let proxy = PortalSettingsProxy::new(&connection).await?;
+    let mut dark = scheme_is_dark(read_scheme(&proxy).await?);
+    let mut signals = proxy.receive_setting_changed().await?;
+    while let Some(signal) = poll_fn(|cx| Pin::new(&mut signals).poll_next(cx)).await {
         let args = signal.args()?;
         if *args.namespace() != APPEARANCE_NS || *args.key() != COLOR_SCHEME_KEY {
             continue;
@@ -99,17 +103,19 @@ fn watch<R: Runtime>(tray: TrayIcon<R>) -> zbus::Result<()> {
 }
 
 fn read_portal_scheme() -> zbus::Result<ColorScheme> {
-    let connection = zbus::blocking::Connection::session()?;
-    let proxy = PortalSettingsProxyBlocking::new(&connection)?;
-    read_scheme(&proxy)
+    zbus::block_on(async {
+        let connection = Connection::session().await?;
+        let proxy = PortalSettingsProxy::new(&connection).await?;
+        read_scheme(&proxy).await
+    })
 }
 
-fn read_scheme(proxy: &PortalSettingsProxyBlocking<'_>) -> zbus::Result<ColorScheme> {
-    let value = proxy.read_one(APPEARANCE_NS, COLOR_SCHEME_KEY)?;
+async fn read_scheme(proxy: &PortalSettingsProxy<'_>) -> zbus::Result<ColorScheme> {
+    let value = proxy.read_one(APPEARANCE_NS, COLOR_SCHEME_KEY).await?;
     Ok(scheme_from_value(&value))
 }
 
-fn scheme_from_value(value: &Value<'_>) -> ColorScheme {
+fn scheme_from_value(value: &Variant<'_>) -> ColorScheme {
     match color_scheme_code(value) {
         Some(code) => scheme_from_code(code),
         None => ColorScheme::NoPreference,
@@ -124,10 +130,10 @@ fn scheme_from_code(code: u32) -> ColorScheme {
     }
 }
 
-fn color_scheme_code(value: &Value<'_>) -> Option<u32> {
+fn color_scheme_code(value: &Variant<'_>) -> Option<u32> {
     match value {
-        Value::U32(code) => Some(*code),
-        Value::Value(inner) => color_scheme_code(inner),
+        Variant::U32(code) => Some(*code),
+        Variant::Variant(inner) => color_scheme_code(inner),
         _ => None,
     }
 }
@@ -194,10 +200,10 @@ mod tests {
 
     #[test]
     fn nested_variant_unwraps_to_code() {
-        let wrapped = Value::Value(Box::new(Value::U32(1)));
+        let wrapped = Variant::Variant(Box::new(Variant::U32(1)));
         assert_eq!(color_scheme_code(&wrapped), Some(1));
-        assert_eq!(color_scheme_code(&Value::U32(2)), Some(2));
-        assert_eq!(color_scheme_code(&Value::Str("dark".into())), None);
+        assert_eq!(color_scheme_code(&Variant::U32(2)), Some(2));
+        assert_eq!(color_scheme_code(&Variant::Str("dark".into())), None);
     }
 
     #[test]
