@@ -7,6 +7,7 @@ import type {
   PrinterInfo,
   PrintLogEntry,
   UiPrinterStatus,
+  UpdateStatus,
 } from "./types.ts";
 
 export interface OverviewModel {
@@ -15,6 +16,37 @@ export interface OverviewModel {
   defaultStatus: UiPrinterStatus | undefined;
   perms: OriginPermissions;
   lastLog: PrintLogEntry | null;
+  update?: UpdateStatus | null;
+  updateChecking?: boolean;
+}
+
+function updateRowHtml(update: UpdateStatus | null | undefined, checking: boolean): string {
+  const current = update ? escapeHtml(update.current) : "…";
+  let badge = "";
+  if (checking) {
+    badge = ' <span class="badge neutral">Checking…</span>';
+  } else if (update?.readyToInstall && update.latest) {
+    badge = ` <span class="badge ok">${escapeHtml(update.latest)} ready to install</span>`;
+  } else if (update?.available && update.latest) {
+    badge = ` <span class="badge ok">${escapeHtml(update.latest)} available</span>`;
+  } else if (update?.error) {
+    badge = ` <span class="badge neutral" title="${escapeHtml(update.error)}">Check failed</span>`;
+  } else if (update?.checkedAtMs) {
+    badge = ' <span class="badge neutral">Up to date</span>';
+  }
+  const action = update?.readyToInstall
+    ? `<button type="button" class="linkish" data-overview-action="install-update">Restart to update</button>`
+    : update?.available
+    ? `<button type="button" class="linkish" data-overview-action="open-release">Download</button>`
+    : `<button type="button" class="linkish" data-overview-action="check-update"${
+        checking ? " disabled" : ""
+      }>Check for updates</button>`;
+  return `
+        <div class="overview-row">
+          <span class="label">Version</span>
+          <span class="value">${current}${badge}</span>
+          ${action}
+        </div>`;
 }
 
 function statusBadge(status: UiPrinterStatus | undefined): string {
@@ -116,6 +148,7 @@ export function buildOverviewHtml(model: OverviewModel): string {
           }</span>
           <button type="button" class="linkish" data-overview-action="goto-prints">Open</button>
         </div>
+        ${updateRowHtml(model.update, model.updateChecking ?? false)}
       </div>
     </section>`;
 }

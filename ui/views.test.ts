@@ -205,3 +205,53 @@ test("buildOverviewHtml warns when no default", () => {
   assert.match(html, /Shipping/);
   assert.match(html, /badge ok/);
 });
+
+test("buildOverviewHtml version row states", () => {
+  const base = {
+    httpStatus: "listening",
+    defaultPrinter: sample,
+    defaultStatus: { kind: "online" } as UiPrinterStatus,
+    perms: { allowed: [], pending: [], denied: [] },
+    lastLog: null,
+  };
+
+  const available = buildOverviewHtml({
+    ...base,
+    update: { current: "0.4.0", latest: "0.5.0", available: true, checkedAtMs: 1 },
+  });
+  assert.match(available, /0\.5\.0 available/);
+  assert.match(available, /data-overview-action="open-release"/);
+  assert.doesNotMatch(available, /check-update/);
+
+  const upToDate = buildOverviewHtml({
+    ...base,
+    update: { current: "0.4.0", latest: "0.4.0", available: false, checkedAtMs: 1 },
+  });
+  assert.match(upToDate, /Up to date/);
+  assert.match(upToDate, /data-overview-action="check-update"/);
+
+  const failed = buildOverviewHtml({
+    ...base,
+    update: { current: "0.4.0", available: false, checkedAtMs: 1, error: "<offline>" },
+  });
+  assert.match(failed, /Check failed/);
+  assert.match(failed, /&lt;offline&gt;/);
+
+  const ready = buildOverviewHtml({
+    ...base,
+    update: {
+      current: "0.4.0",
+      latest: "0.5.0",
+      available: true,
+      checkedAtMs: 1,
+      readyToInstall: true,
+    },
+  });
+  assert.match(ready, /0\.5\.0 ready to install/);
+  assert.match(ready, /data-overview-action="install-update"/);
+  assert.doesNotMatch(ready, /open-release/);
+
+  const checking = buildOverviewHtml({ ...base, update: null, updateChecking: true });
+  assert.match(checking, /Checking…/);
+  assert.match(checking, /check-update" disabled/);
+});

@@ -8,6 +8,7 @@ mod local_network;
 mod print;
 mod print_log;
 mod state;
+mod update_check;
 mod usb_discovery;
 
 use config::{
@@ -23,6 +24,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use update_check::{UpdateState, UpdateStatus};
 use usb_discovery::search_all_printers;
 
 /// LaunchAgent must not point at `target/debug` (breaks Local Network / identity).
@@ -403,6 +405,26 @@ async fn revoke_origin(
     Ok(permissions_snapshot(&state.http_shared()).await)
 }
 
+#[tauri::command]
+fn get_update_status(state: tauri::State<'_, UpdateState>) -> UpdateStatus {
+    state.snapshot()
+}
+
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) -> Result<UpdateStatus, String> {
+    Ok(update_check::check_now(&app).await)
+}
+
+#[tauri::command]
+fn open_release_page(app: AppHandle) -> Result<(), String> {
+    update_check::open_release_page(&app)
+}
+
+#[tauri::command]
+fn install_update(app: AppHandle) -> Result<(), String> {
+    update_check::install_update(&app)
+}
+
 fn show_settings(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
@@ -420,6 +442,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![]),
@@ -524,12 +547,14 @@ pub fn run() {
             // taskbar, so use the full-color app icon.
             #[cfg(target_os = "windows")]
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
-            let tray = TrayIconBuilder::new()
+            app.manage(UpdateState::new(menu.clone()));
+            let tray = TrayIconBuilder::with_id(update_check::TRAY_ID)
                 .icon(tray_icon)
                 .menu(&menu)
                 .tooltip(&tray_tooltip)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "app_name" | "settings" => show_settings(app),
+                    update_check::TRAY_ITEM_ID => update_check::activate_tray_item(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -551,6 +576,11 @@ pub fn run() {
             linux_tray::follow_color_scheme(built);
             #[cfg(not(target_os = "linux"))]
             let _ = built;
+
+            // Dev builds report an arbitrary version; manual "Check for updates" still works.
+            if !cfg!(debug_assertions) {
+                update_check::spawn_periodic_check(app.handle().clone());
+            }
 
             // Close settings to tray instead of quitting
             if let Some(window) = app.get_webview_window("settings") {
@@ -586,7 +616,11 @@ pub fn run() {
             approve_origin,
             deny_origin,
             remove_denied_origin,
-            revoke_origin
+            revoke_origin,
+            get_update_status,
+            check_for_updates,
+            open_release_page,
+            install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running RawLabelPrint");

@@ -74,14 +74,20 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
-      - name: Build NSIS installer
-        run: npm run tauri build -- --bundles nsis
+      # Updater artifacts (.exe.sig) are only produced here; CI builds stay unsigned.
+      - name: Build signed NSIS installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.updater.conf.json
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
           name: RawLabelPrint-windows-nsis
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
 
   publish:
@@ -100,6 +106,32 @@ jobs:
         with:
           name: RawLabelPrint-windows-nsis
           path: dist/
+
+      # Manifest for tauri-plugin-updater, served via releases/latest/download/latest.json.
+      - name: Create updater manifest
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sigs=(dist/*-setup.exe.sig)
+          if [ "${#sigs[@]}" -ne 1 ]; then
+            echo "Expected exactly one NSIS signature, found ${#sigs[@]}" >&2
+            exit 1
+          fi
+          sig_file="${sigs[0]}"
+          exe_name="$(basename "${sig_file%.sig}")"
+          jq -n \
+            --arg version "${TAG#v}" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg signature "$(cat "$sig_file")" \
+            --arg url "https://github.com/${REPO}/releases/download/${TAG}/${exe_name}" \
+            '{version: $version, pub_date: $pub_date,
+              platforms: {"windows-x86_64": {signature: $signature, url: $url}}}' \
+            > dist/latest.json
+          rm "$sig_file"
+          cat dist/latest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -57,6 +57,17 @@ export interface PrintLogEntry {
   error?: string | null;
 }
 
+export interface UpdateStatus {
+  current: string;
+  latest?: string | null;
+  url?: string | null;
+  available: boolean;
+  checkedAtMs?: number | null;
+  error?: string | null;
+  /** Windows only: installer downloaded and verified, waiting for restart. */
+  readyToInstall?: boolean;
+}
+
 export type PrinterStatusKind = "checking" | "online" | "offline";
 
 export interface UiPrinterStatus {

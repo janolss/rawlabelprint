@@ -1,4 +1,4 @@
-//#region src/http.ts
+// src/http.ts
 var e = 15e3;
 function t(e = globalThis.navigator?.userAgent, t = globalThis.location?.protocol) {
 	let n = e ?? "";
@@ -99,8 +99,7 @@ function p(e, t, r) {
 		a ? a(i) : console.error("BrowserPrint error (no errorCallback):", i);
 	} catch {}
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/typeof.js
+// \0@oxc-project+runtime@0.155.0/helpers/esm/typeof.js
 function m(e) {
 	"@babel/helpers - typeof";
 	return m = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
@@ -109,8 +108,7 @@ function m(e) {
 		return e && typeof Symbol == "function" && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e;
 	}, m(e);
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPrimitive.js
+// \0@oxc-project+runtime@0.155.0/helpers/esm/toPrimitive.js
 function h(e, t) {
 	if (m(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
@@ -121,14 +119,12 @@ function h(e, t) {
 	}
 	return (t === "string" ? String : Number)(e);
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/toPropertyKey.js
+// \0@oxc-project+runtime@0.155.0/helpers/esm/toPropertyKey.js
 function g(e) {
 	var t = h(e, "string");
 	return m(t) == "symbol" ? t : t + "";
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.152.0/helpers/esm/defineProperty.js
+// \0@oxc-project+runtime@0.155.0/helpers/esm/defineProperty.js
 function _(e, t, n) {
 	return (t = g(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
@@ -244,11 +240,7 @@ function S(e, t) {
 					return;
 				}
 				let i = a + n;
-				if (v.encode(i).byteLength > 2097152) {
-					p(c, e.defaultErrorCallback, "Read buffer exceeded maximum size");
-					return;
-				}
-				t !== "" && i.includes(t) ? f(s, i) : this.readUntilStringReceived(t, s, c, r - 1, i);
+				v.encode(i).byteLength > 2097152 ? p(c, e.defaultErrorCallback, "Read buffer exceeded maximum size") : t !== "" && i.includes(t) ? f(s, i) : this.readUntilStringReceived(t, s, c, r - 1, i);
 			}, c);
 		}
 		readAllAvailable(e, t, n) {
@@ -271,8 +263,7 @@ function S(e, t) {
 		}
 	};
 }
-//#endregion
-//#region src/api.ts
+// src/api.ts
 function C(e) {
 	return e.length < 3 ? "" : e.substring(e.length - 3);
 }
@@ -314,11 +305,7 @@ function T(e = {}) {
 		}).catch((e) => p(n, a.defaultErrorCallback, e));
 	}, a.getApplicationConfiguration = (e, t) => {
 		c(`${i}config`, r(a.debug, { method: "GET" })).then((t) => {
-			if (t === "") {
-				f(e, null);
-				return;
-			}
-			f(e, u(t));
+			t === "" ? f(e, null) : f(e, u(t));
 		}).catch((e) => p(t, a.defaultErrorCallback, e));
 	}, a.readOnInterval = (e, t, n) => {
 		let r = n;
@@ -396,8 +383,7 @@ function T(e = {}) {
 		}).catch((e) => p(o, a.defaultErrorCallback, e));
 	}, a;
 }
-//#endregion
-//#region src/zebra/helpers.ts
+// src/zebra/helpers.ts
 function E(e, t) {
 	if (/["\x00-\x1f\x7f]/.test(e)) throw Error(`Invalid SGD ${t}`);
 }
@@ -492,17 +478,13 @@ function R(e) {
 					resolve: r,
 					reject: i
 				}, o = e === "status" ? this.queue.find((e) => e.kind === "status" && !e.started) : void 0;
-				if (o) {
-					o.waiters.push(a);
-					return;
-				}
-				this.queue.push({
+				o ? o.waiters.push(a) : (this.queue.push({
 					kind: e,
 					command: t,
 					parse: n,
 					waiters: [a],
 					started: !1
-				}), this.pump();
+				}), this.pump());
 			});
 		}
 		pump() {
@@ -616,8 +598,7 @@ function R(e) {
 	}
 	return _(n, "Status", N), _(n, "Info", P), _(n, "Configuration", F), n;
 }
-//#endregion
-//#region src/zebra/watch.ts
+// src/zebra/watch.ts
 function z(e, t) {
 	let n = /* @__PURE__ */ new Map(), r;
 	function i(e) {
@@ -657,8 +638,7 @@ function z(e, t) {
 		}
 	};
 }
-//#endregion
-//#region src/zebra/create.ts
+// src/zebra/create.ts
 function B(e, t = {}) {
 	let n = t.pollIntervalMs ?? 2e3, r = R(e), { watch: i, stopWatching: a } = z(r, n);
 	return {
@@ -667,8 +647,7 @@ function B(e, t = {}) {
 		stopWatching: a
 	};
 }
-//#endregion
-//#region src/index.ts
+// src/index.ts
 var V = T(), H = B(V);
 if (Object.assign(V, {
 	createBrowserPrint: T,
@@ -679,7 +658,6 @@ if (Object.assign(V, {
 	let e = globalThis;
 	e.BrowserPrint ?? (e.BrowserPrint = V), e.Zebra ?? (e.Zebra = H);
 }
-//#endregion
 export { V as default };
 
 //# sourceMappingURL=browserprint.js.map
