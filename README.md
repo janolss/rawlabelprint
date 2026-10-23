@@ -59,7 +59,7 @@ If `printer` is omitted/empty, the **default printer** selected in Settings is u
 
 Only printers saved in Settings are listed or printed. A search result is not visible to clients until it is saved.
 
-Browser pages must be approved once under **Allowed websites**. A browser request that omits `Origin` is rejected. Clients that send neither `Origin` nor browser `Sec-Fetch-*` headers (for example curl) are not gated. Denied websites stay denied until removed in Settings. The origin gate applies to all HTTP endpoints, including `/config`.
+Browser pages must be approved once under **Allowed websites**. A browser request that omits `Origin` is rejected. Clients that send neither `Origin` nor browser `Sec-Fetch-*` headers (for example curl) are blocked unless **Allow local scripts** is enabled in Settings. Denied websites stay denied until removed in Settings. The origin gate applies to all HTTP endpoints, including `/config`.
 
 `sendUrl` loads `http://` resources. Loopback, link-local, and multicast addresses are rejected. Private LAN addresses are allowed.
 

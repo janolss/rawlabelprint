@@ -8,46 +8,42 @@
   </head>
   <body>
     <main class="settings">
-      <header>
-        <p class="subtitle">Raw label printing from the browser</p>
-      </header>
-
-      <div class="tabs" role="tablist" aria-label="Settings">
-        <button
-          type="button"
-          class="tab active"
-          role="tab"
-          id="tabPrinters"
-          aria-selected="true"
-          aria-controls="panelPrinters"
-          data-tab="printers"
-        >
+      <nav class="sidebar" aria-label="Settings">
+        <button type="button" class="nav-item active" data-pane="overview" aria-current="page">
+          Overview
+        </button>
+        <button type="button" class="nav-item" data-pane="printers">
           Printers
+          <span id="navPrintersBadge" class="nav-badge hidden" aria-hidden="true"></span>
         </button>
-        <button
-          type="button"
-          class="tab"
-          role="tab"
-          id="tabGeneral"
-          aria-selected="false"
-          aria-controls="panelGeneral"
-          data-tab="general"
-        >
-          General
+        <button type="button" class="nav-item" data-pane="sites">
+          Websites
+          <span id="navSitesBadge" class="nav-badge hidden" aria-hidden="true"></span>
         </button>
-      </div>
+        <button type="button" class="nav-item" data-pane="prints">Prints</button>
+        <button type="button" class="nav-item" data-pane="server">Server</button>
+        <button type="button" class="nav-item" data-pane="advanced">Advanced</button>
+      </nav>
 
-      <div
-        class="tab-panel active"
-        role="tabpanel"
-        id="panelPrinters"
-        aria-labelledby="tabPrinters"
-        data-panel="printers"
-      >
-        <div class="printers-grid">
-          <div class="printers-col">
-            <section class="block">
-              <h2>Add printer manually</h2>
+      <div class="content">
+        <section class="pane active" data-pane="overview" id="paneOverview">
+          <div id="overviewRoot"></div>
+        </section>
+
+        <section class="pane" data-pane="printers" id="panePrinters" hidden>
+          <section class="block">
+            <h2>Add printer</h2>
+            <div class="button-row">
+              <button type="button" class="primary" id="searchBtn">Search Zebra printers</button>
+              <button type="button" id="toggleManualBtn">Add manually</button>
+            </div>
+            <p class="hint">
+              Finds network printers (UDP 4201) and USB CDC printers (Zebra VID 0x0A5F).
+            </p>
+            <div id="searchResults" class="search-results hidden"></div>
+
+            <div id="manualForm" class="collapsible-form hidden">
+              <h3 class="block-subtitle">Add printer manually</h3>
               <div class="row">
                 <label for="manualName">Name</label>
                 <input id="manualName" type="text" placeholder="Shipping label" />
@@ -60,8 +56,17 @@
                 <label for="manualPort">Print port</label>
                 <input id="manualPort" type="number" min="1" max="65535" value="9100" />
               </div>
-              <button type="button" id="addManualBtn">Add &amp; set as default</button>
-              <h3 class="block-subtitle">Virtual printer</h3>
+              <label class="checkbox">
+                <input type="checkbox" id="manualMakeDefault" />
+                Make default
+              </label>
+              <div class="button-row">
+                <button type="button" id="addManualBtn">Add printer</button>
+              </div>
+            </div>
+
+            <details class="virtual-details">
+              <summary>Virtual printer (for testing)</summary>
               <p class="hint">
                 Accepts jobs with no device. An optional capture file is appended on each print.
                 Recent prints lists these jobs even when debug logging is off.
@@ -74,133 +79,131 @@
                 <label for="virtualCapturePath">Capture file</label>
                 <input id="virtualCapturePath" type="text" placeholder="Optional path" />
               </div>
-              <button type="button" id="addVirtualBtn">Add virtual printer</button>
-            </section>
-
-            <section class="block">
-              <h2>Search LAN / USB</h2>
-              <div class="button-row">
-                <button type="button" id="searchBtn">Search Zebra printers</button>
-              </div>
-              <p class="hint">
-                Finds network printers (UDP 4201) and USB CDC printers (Zebra VID 0x0A5F).
-              </p>
-              <div id="searchResults" class="search-results hidden"></div>
-            </section>
-          </div>
-
-          <div class="printers-col">
-            <section class="block block-fill">
-              <h2>Saved printers</h2>
-              <p class="hint">
-                Edit name/IP, set default, or remove. Click Online/Offline to recheck.
-              </p>
-              <div id="savedList" class="saved-list"></div>
-            </section>
-          </div>
-        </div>
-      </div>
-
-      <div
-        class="tab-panel"
-        role="tabpanel"
-        id="panelGeneral"
-        aria-labelledby="tabGeneral"
-        data-panel="general"
-        hidden
-      >
-        <div class="printers-grid">
-          <div class="printers-col">
-            <section class="block">
-              <h3 class="block-subtitle">HTTP server</h3>
-              <div class="row">
-                <label for="listenAddress">Address</label>
-                <input id="listenAddress" type="text" value="127.0.0.1" readonly />
-              </div>
-              <div class="row">
-                <label for="port">Port</label>
-                <input id="port" type="number" min="1" max="65535" value="9100" />
-              </div>
               <label class="checkbox">
-                <input type="checkbox" id="browserPrintCompatible" checked />
-                Compatible mode (Zebra Browser Print API)
+                <input type="checkbox" id="virtualMakeDefault" />
+                Make default
               </label>
+              <div class="button-row">
+                <button type="button" id="addVirtualBtn">Add virtual printer</button>
+              </div>
+            </details>
+          </section>
+
+          <section class="block">
+            <h2>Saved printers</h2>
+            <p class="hint">Edit name/IP, set default, or remove. Use ↻ to recheck status.</p>
+            <div id="savedList" class="saved-list"></div>
+          </section>
+        </section>
+
+        <section class="pane" data-pane="sites" id="paneSites" hidden>
+          <section class="block">
+            <h2>Websites</h2>
+            <p class="hint">
+              The first print or device list from a new website requires approval here.
+            </p>
+            <label class="checkbox">
+              <input type="checkbox" id="allowLocalScripts" />
+              Allow local scripts (curl and similar)
+            </label>
+            <details class="hint-details">
+              <summary>More about website access</summary>
+              <p class="hint">
+                Browser requests without an <code>Origin</code> header are rejected. When local
+                scripts are off, only approved websites may use the API. When on, clients that send
+                neither <code>Origin</code> nor browser fetch metadata (for example curl) can print
+                without website approval. Denied websites stay denied until removed.
+              </p>
+            </details>
+            <div id="originPendingList" class="origin-list"></div>
+            <div id="originAllowedList" class="origin-list"></div>
+            <div id="originDeniedList" class="origin-list"></div>
+          </section>
+        </section>
+
+        <section class="pane" data-pane="prints" id="panePrints" hidden>
+          <section class="block">
+            <div class="block-header-row">
+              <h2>Recent prints</h2>
+              <div class="button-row inline">
+                <button type="button" id="refreshPrintLogBtn">Refresh</button>
+                <button type="button" id="clearPrintLogBtn">Clear</button>
+              </div>
+            </div>
+            <label class="checkbox">
+              <input type="checkbox" id="debugLogging" />
+              Capture recent print requests
+            </label>
+            <p class="hint">
+              Keeps the last 50 print jobs in memory (payload preview up to 20&nbsp;KB). Shows HTTP
+              print calls (<code>/</code>, <code>/write</code>, <code>/convert</code>) and in-app
+              test prints. Virtual printer jobs are listed even when capture is off.
+            </p>
+            <div id="printLogList" class="print-log-list">
+              <div class="printer-card muted">No print requests captured yet</div>
+            </div>
+          </section>
+        </section>
+
+        <section class="pane" data-pane="server" id="paneServer" hidden>
+          <section class="block">
+            <h2>HTTP server</h2>
+            <div class="row">
+              <label>Address</label>
+              <div class="static-value-row">
+                <span id="listenAddressDisplay" class="static-value">127.0.0.1</span>
+                <input id="listenAddress" type="hidden" value="127.0.0.1" />
+              </div>
+            </div>
+            <div class="row">
+              <label for="port">Port</label>
+              <input id="port" type="number" min="1" max="65535" value="9100" />
+            </div>
+            <label class="checkbox">
+              <input type="checkbox" id="browserPrintCompatible" checked />
+              Compatible mode (Zebra Browser Print API)
+            </label>
+            <details class="hint-details">
+              <summary>Compatible mode endpoints</summary>
               <p class="hint">
                 Enables <code>/available</code>, <code>/default</code>, <code>/write</code>,
                 <code>/read</code>, <code>/config</code> so BrowserPrint.js works as a drop-in.
               </p>
-              <p class="status" id="httpStatus">Status: …</p>
-              <button type="button" class="primary" id="saveHttpBtn">Save &amp; apply</button>
-              <p class="footer-note">
-                API: <code id="apiUrl">http://127.0.0.1:9100/</code>
-              </p>
-            </section>
-          </div>
-
-          <div class="printers-col">
-            <section class="block">
-              <h3 class="block-subtitle">Startup</h3>
-              <label class="checkbox">
-                <input type="checkbox" id="launchAtLogin" />
-                Launch at login
-              </label>
-            </section>
-
-            <section class="block">
-              <h3 class="block-subtitle">Debug</h3>
-              <label class="checkbox">
-                <input type="checkbox" id="debugLogging" />
-                Capture recent print requests
-              </label>
-              <p class="hint">
-                Keeps the last 50 print jobs in memory (payload preview up to 20&nbsp;KB).
-              </p>
-            </section>
-
-            <section class="block">
-              <h3 class="block-subtitle">Allowed websites</h3>
-              <p class="hint">
-                The first print or device list from a new website requires approval here. Browser
-                requests without an <code>Origin</code> header are rejected. Local scripts that do
-                not send browser fetch metadata are not gated. Denied websites stay denied until
-                removed.
-              </p>
-              <div id="originPendingList" class="origin-list"></div>
-              <div id="originAllowedList" class="origin-list"></div>
-              <div id="originDeniedList" class="origin-list"></div>
-            </section>
-          </div>
-        </div>
-
-        <section class="block">
-          <h3 class="block-subtitle">Printers and websites</h3>
-          <p class="hint">
-            Move saved printers and the website lists to another install. HTTP port, startup, and
-            Compatible mode stay as they are.
-          </p>
-          <div class="button-row">
-            <button type="button" id="exportPrintersBtn">Export printers and websites</button>
-            <button type="button" id="importPrintersBtn">Import printers and websites</button>
-          </div>
-          <input id="importPrintersFile" type="file" accept="application/json,.json" hidden />
-          <p class="status" id="transferStatus"></p>
+            </details>
+            <p class="status" id="httpStatus">Status: …</p>
+            <div class="button-row">
+              <button type="button" class="primary" id="saveHttpBtn" disabled>Save &amp; apply</button>
+            </div>
+            <p class="footer-note">
+              API:
+              <code id="apiUrl">http://127.0.0.1:9100/</code>
+              <button type="button" class="linkish" id="copyApiUrlBtn">Copy</button>
+            </p>
+          </section>
         </section>
 
-        <section class="block">
-          <div class="block-header-row">
-            <h3 class="block-subtitle">Recent prints</h3>
-            <div class="button-row inline">
-              <button type="button" id="refreshPrintLogBtn">Refresh</button>
-              <button type="button" id="clearPrintLogBtn">Clear</button>
+        <section class="pane" data-pane="advanced" id="paneAdvanced" hidden>
+          <section class="block">
+            <h2>Startup</h2>
+            <label class="checkbox">
+              <input type="checkbox" id="launchAtLogin" />
+              Launch at login
+            </label>
+          </section>
+
+          <section class="block">
+            <h2>Backup settings</h2>
+            <p class="hint">
+              Move saved printers and the website lists to another install. HTTP port, startup, and
+              Compatible mode stay as they are.
+            </p>
+            <div class="button-row">
+              <button type="button" id="exportPrintersBtn">Export printers and websites</button>
+              <button type="button" id="importPrintersBtn">Import printers and websites</button>
             </div>
-          </div>
-          <p class="hint">
-            Shows HTTP print calls (<code>/</code>, <code>/write</code>, <code>/convert</code>) and
-            in-app test prints.
-          </p>
-          <div id="printLogList" class="print-log-list">
-            <div class="printer-card muted">No print requests captured yet</div>
-          </div>
+            <input id="importPrintersFile" type="file" accept="application/json,.json" hidden />
+            <p class="status" id="transferStatus"></p>
+          </section>
         </section>
       </div>
     </main>

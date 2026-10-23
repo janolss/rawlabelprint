@@ -15,6 +15,7 @@
     "launchAtLogin": { "type": "boolean" },
     "browserPrintCompatible": { "type": "boolean" },
     "debugLogging": { "type": "boolean" },
+    "allowLocalScripts": { "type": "boolean" },
     "allowedOrigins": {
       "type": "array",
       "items": { "type": "string" }
@@ -78,6 +79,7 @@
       "launchAtLogin": false,
       "browserPrintCompatible": true,
       "debugLogging": false,
+      "allowLocalScripts": false,
       "allowedOrigins": ["http://127.0.0.1:8080"],
       "deniedOrigins": []
     }

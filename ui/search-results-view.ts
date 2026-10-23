@@ -16,18 +16,20 @@ export function buildSearchErrorHtml(error: unknown): string {
   return `<div class="printer-card"><span class="badge bad">${escapeHtml(String(error))}</span></div>`;
 }
 
-export function buildSearchResultsHtml(printers: PrinterInfo[]): string {
+export function buildSearchResultsHtml(
+  printers: PrinterInfo[],
+  savedAddresses: Set<string> = new Set(),
+  makeDefaultChecked = false
+): string {
   return printers
     .map((p, idx) => {
       const usb = isUsbPrinter(p);
       const title = escapeHtml(p.model || p.address);
-      const heading = usb
-        ? `<h3>${title}</h3>`
-        : `<h3>
-          <a href="#" data-config-url="http://${escapeHtml(p.address)}:${escapeHtml(p.configPort)}">
-            ${title}
-          </a>
-        </h3>`;
+      const alreadySaved = savedAddresses.has(p.address);
+      const heading = `<h3>${title}</h3>`;
+      const configLink = usb
+        ? ""
+        : `<a class="result-config-link" href="#" data-config-url="http://${escapeHtml(p.address)}:${escapeHtml(p.configPort)}">Open web config</a>`;
       const meta = usb
         ? `Connection: USB<br />
           Device: ${escapeHtml(p.address)}<br />
@@ -36,16 +38,24 @@ export function buildSearchResultsHtml(printers: PrinterInfo[]): string {
           Firmware: ${escapeHtml(p.firmware || "—")}<br />
           Serial: ${escapeHtml(p.serialNumber || "—")}<br />
           Print port: ${escapeHtml(p.printPort)}`;
+      const saveLabel = alreadySaved ? "Update" : "Save";
       return `
       <div class="result-card">
         ${heading}
         <p class="result-meta">
-          <span class="badge neutral">${usb ? "USB" : "Network"}</span><br />
+          <span class="badge neutral">${usb ? "USB" : "Network"}</span>
+          ${alreadySaved ? `<span class="badge ok">Saved</span>` : ""}
+          <br />
           ${meta}
+          ${configLink ? `<br />${configLink}` : ""}
         </p>
+        <label class="checkbox">
+          <input type="checkbox" data-make-default-idx="${idx}" ${makeDefaultChecked ? "checked" : ""} />
+          Make default
+        </label>
         <div class="button-row">
           <button type="button" data-test-idx="${idx}">Test connection</button>
-          <button type="button" class="primary" data-save-idx="${idx}">Save &amp; set default</button>
+          <button type="button" class="primary" data-save-idx="${idx}">${saveLabel}</button>
         </div>
         <div class="conn-status" data-status-idx="${idx}"></div>
       </div>`;

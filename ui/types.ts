@@ -23,6 +23,7 @@ export interface AppConfig {
   launchAtLogin: boolean;
   browserPrintCompatible: boolean;
   debugLogging: boolean;
+  allowLocalScripts: boolean;
   allowedOrigins?: string[];
   deniedOrigins?: string[];
 }
