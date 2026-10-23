@@ -22,6 +22,7 @@ import type {
   PrinterStatus,
   PrintLogEntry,
   UiPrinterStatus,
+  UpdateStatus,
 } from "./types.ts";
 
 function requireEl<T extends HTMLElement>(id: string): T {
@@ -76,6 +77,8 @@ let lastDiscovered: PrinterInfo[] = [];
 let lastPrintLog: PrintLogEntry[] = [];
 let lastOriginPerms: OriginPermissions = { allowed: [], pending: [], denied: [] };
 let lastHttpStatusText = "…";
+let lastUpdateStatus: UpdateStatus | null = null;
+let updateChecking = false;
 const printerStatuses = new Map<string, UiPrinterStatus>();
 const statusCheckedAt = new Map<string, number>();
 const editingAddresses = new Set<string>();
@@ -265,7 +268,27 @@ function renderOverview(): void {
     defaultStatus: defAddr ? printerStatuses.get(defAddr) : undefined,
     perms: lastOriginPerms,
     lastLog: lastPrintLog[0] ?? null,
+    update: lastUpdateStatus,
+    updateChecking,
   });
+}
+
+async function refreshUpdateStatus(): Promise<void> {
+  lastUpdateStatus = await invoke<UpdateStatus>("get_update_status");
+  renderOverview();
+}
+
+async function checkForUpdates(): Promise<void> {
+  updateChecking = true;
+  renderOverview();
+  try {
+    lastUpdateStatus = await invoke<UpdateStatus>("check_for_updates");
+  } catch (e) {
+    console.error(e);
+  } finally {
+    updateChecking = false;
+    renderOverview();
+  }
 }
 
 function renderSaved(list: PrinterInfo[] | null | undefined): void {
@@ -553,6 +576,7 @@ async function load(): Promise<void> {
   await refreshAllPrinterStatuses();
   await refreshPrintLog();
   await refreshOriginPermissions();
+  await refreshUpdateStatus();
 }
 
 els.saveHttpBtn.addEventListener("click", async () => {
@@ -744,6 +768,11 @@ void listen("origin-pending", (event) => {
     .catch((e) => console.error(e));
 });
 
+void listen<UpdateStatus>("update-available", (event) => {
+  lastUpdateStatus = event.payload;
+  renderOverview();
+});
+
 els.printLogList.addEventListener("click", async (e) => {
   const target = e.target;
   if (!(target instanceof Element)) return;
@@ -918,6 +947,13 @@ els.overviewRoot.addEventListener("click", (e) => {
   if (action === "recheck-default") {
     const addr = defaultAddress();
     if (addr) void refreshPrinterStatus(addr);
+  }
+  if (action === "check-update") void checkForUpdates();
+  if (action === "open-release") {
+    invoke("open_release_page").catch((err) => console.error(err));
+  }
+  if (action === "install-update") {
+    invoke("install_update").catch((err) => alert(String(err)));
   }
 });
 
