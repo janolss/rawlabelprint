@@ -44,6 +44,8 @@ pub(crate) fn lan_printer(address: &str, print_port: u16) -> PrinterInfo {
 pub(crate) fn test_state(compatible: bool, default: Option<PrinterInfo>) -> HttpSharedState {
     let mut config = AppConfig {
         browser_print_compatible: compatible,
+        // Exercise print routes without inventing Origin headers in every test.
+        allow_local_scripts: true,
         ..Default::default()
     };
     if let Some(p) = default {
@@ -67,6 +69,7 @@ pub(crate) async fn state_with_printer(
     let mut config = AppConfig {
         debug_logging,
         browser_print_compatible: true,
+        allow_local_scripts: true,
         ..Default::default()
     };
     config.upsert_printer(printer, true);

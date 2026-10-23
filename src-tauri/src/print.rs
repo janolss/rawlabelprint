@@ -3,7 +3,7 @@
 
 use crate::config::{Connection, PrinterInfo};
 use crate::usb_discovery::find_port_path_by_serial;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -167,20 +167,21 @@ impl DeviceSessionPool {
             .clone())
     }
 
-    fn drop_idle_gates(
-        gates: &mut HashMap<String, Arc<Mutex<()>>>,
-        live: &HashMap<String, DeviceSession>,
-    ) {
-        gates.retain(|key, gate| live.contains_key(key) || gate.try_lock().is_err());
+    fn drop_idle_gates(gates: &mut HashMap<String, Arc<Mutex<()>>>, live: &HashSet<String>) {
+        gates.retain(|key, gate| live.contains(key) || gate.try_lock().is_err());
     }
 
     pub fn purge_idle_sessions(&self) {
-        let Ok(mut map) = self.inner.lock() else {
-            return;
+        // Snapshot live keys so `inner` is released before `gates` is locked.
+        let live_keys: HashSet<String> = {
+            let Ok(mut map) = self.inner.lock() else {
+                return;
+            };
+            Self::purge_idle(&mut map);
+            map.keys().cloned().collect()
         };
-        Self::purge_idle(&mut map);
         if let Ok(mut gates) = self.gates.lock() {
-            Self::drop_idle_gates(&mut gates, &map);
+            Self::drop_idle_gates(&mut gates, &live_keys);
         }
     }
 

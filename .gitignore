@@ -27,6 +27,9 @@ dist-ssr
 # Local reference copies (not part of the app)
 reference/*
 
+# Mcp & RAG servers
+rag-mcp/*
+
 # Tauri / Rust
 src-tauri/target
 tauri.gitignore

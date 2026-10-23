@@ -41,6 +41,7 @@ async fn get_http_status(state: tauri::State<'_, Arc<AppState>>) -> Result<Strin
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects State/AppHandle; settings stay flat for invoke()
 async fn save_settings(
     state: tauri::State<'_, Arc<AppState>>,
     listen_address: String,
@@ -48,6 +49,7 @@ async fn save_settings(
     launch_at_login: bool,
     browser_print_compatible: bool,
     debug_logging: bool,
+    allow_local_scripts: bool,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
     let port = require_listen_port(port)?;
@@ -77,6 +79,7 @@ async fn save_settings(
     updated.launch_at_login = launch_at_login;
     updated.browser_print_compatible = browser_print_compatible;
     updated.debug_logging = debug_logging;
+    updated.allow_local_scripts = allow_local_scripts;
     if let Err(err) = save_config(&state.app_data_dir, &updated) {
         let rollback_result = if autostart_changed {
             if previous.launch_at_login {
@@ -125,11 +128,26 @@ async fn set_default_printer(
 }
 
 #[tauri::command]
+async fn save_printer(
+    state: tauri::State<'_, Arc<AppState>>,
+    printer: PrinterInfo,
+    make_default: bool,
+) -> Result<AppConfig, String> {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.upsert_printer(printer, make_default);
+    }
+    state.persist().await?;
+    Ok(state.config.read().await.clone())
+}
+
+#[tauri::command]
 async fn add_manual_printer(
     state: tauri::State<'_, Arc<AppState>>,
     name: String,
     address: String,
     print_port: u16,
+    make_default: bool,
 ) -> Result<AppConfig, String> {
     let address = parse_ip_address(&address)?;
     let printer = PrinterInfo {
@@ -150,7 +168,7 @@ async fn add_manual_printer(
     };
     {
         let mut cfg = state.config.write().await;
-        cfg.upsert_printer(printer, true);
+        cfg.upsert_printer(printer, make_default);
     }
     state.persist().await?;
     Ok(state.config.read().await.clone())
@@ -161,6 +179,7 @@ async fn add_virtual_printer(
     state: tauri::State<'_, Arc<AppState>>,
     name: String,
     capture_path: Option<String>,
+    make_default: bool,
 ) -> Result<AppConfig, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -188,7 +207,7 @@ async fn add_virtual_printer(
     };
     {
         let mut cfg = state.config.write().await;
-        cfg.upsert_printer(printer, true);
+        cfg.upsert_printer(printer, make_default);
     }
     state.persist().await?;
     Ok(state.config.read().await.clone())
@@ -552,6 +571,7 @@ pub fn run() {
             save_settings,
             discover_printers,
             set_default_printer,
+            save_printer,
             add_manual_printer,
             add_virtual_printer,
             import_printers_and_websites,

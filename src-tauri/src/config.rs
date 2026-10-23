@@ -176,6 +176,10 @@ pub struct AppConfig {
     /// When true, capture recent print requests in an in-memory ring buffer for Settings.
     #[serde(default = "default_debug_logging")]
     pub debug_logging: bool,
+    /// When true, HTTP clients without an Origin header and without browser Sec-Fetch-*
+    /// metadata (curl/scripts) may use the API. When false, only approved browser Origins.
+    #[serde(default = "default_allow_local_scripts")]
+    pub allow_local_scripts: bool,
     /// Browser Origins allowed to print via the local HTTP API (soft allowlist).
     #[serde(default)]
     pub allowed_origins: Vec<String>,
@@ -205,6 +209,10 @@ fn default_debug_logging() -> bool {
     false
 }
 
+fn default_allow_local_scripts() -> bool {
+    false
+}
+
 pub fn parse_ip_address(address: &str) -> Result<String, String> {
     let address = address.trim();
     if address.parse::<IpAddr>().is_err() {
@@ -231,6 +239,7 @@ impl Default for AppConfig {
             launch_at_login: false,
             browser_print_compatible: default_browser_print_compatible(),
             debug_logging: default_debug_logging(),
+            allow_local_scripts: default_allow_local_scripts(),
             allowed_origins: Vec::new(),
             denied_origins: Vec::new(),
         }
@@ -314,9 +323,11 @@ impl AppConfig {
     }
 
     /// Insert or replace by address. Optionally mark as default.
+    /// When there is no default yet, the printer becomes default regardless of `make_default`.
     pub fn upsert_printer(&mut self, printer: PrinterInfo, make_default: bool) {
         self.added_printers.retain(|p| p.address != printer.address);
         let refresh_default = make_default
+            || self.default_printer.is_none()
             || self
                 .default_printer
                 .as_ref()
@@ -791,6 +802,16 @@ mod tests {
     }
 
     #[test]
+    fn upsert_without_make_default_becomes_default_when_none() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_printer(sample_printer("10.0.0.1", ""), false);
+        assert_eq!(cfg.default_printer.as_ref().unwrap().address, "10.0.0.1");
+        cfg.upsert_printer(sample_printer("10.0.0.2", ""), false);
+        assert_eq!(cfg.default_printer.as_ref().unwrap().address, "10.0.0.1");
+        assert_eq!(cfg.added_printers.len(), 2);
+    }
+
+    #[test]
     fn update_printer_rejects_unknown_and_duplicate() {
         let mut cfg = AppConfig::default();
         cfg.upsert_printer(sample_printer("10.0.0.1", ""), true);
@@ -873,6 +894,7 @@ mod tests {
         let loaded = load_config(dir.path()).unwrap();
         assert_eq!(loaded.port, 9100);
         assert!(loaded.browser_print_compatible);
+        assert!(!loaded.allow_local_scripts);
         assert!(loaded.added_printers.is_empty());
         assert!(loaded.default_printer.is_none());
     }
@@ -999,6 +1021,7 @@ mod tests {
         let example = schema["examples"][0].clone();
         let config: AppConfig = serde_json::from_value(example).unwrap();
         assert_eq!(config.port, 9100);
+        assert!(!config.allow_local_scripts);
         assert!(config
             .added_printers
             .iter()
@@ -1016,6 +1039,7 @@ mod tests {
             browser_print_compatible: false,
             launch_at_login: true,
             debug_logging: true,
+            allow_local_scripts: true,
             ..AppConfig::default()
         };
         let json = r#"{
@@ -1044,6 +1068,7 @@ mod tests {
         assert!(!config.browser_print_compatible);
         assert!(config.launch_at_login);
         assert!(config.debug_logging);
+        assert!(config.allow_local_scripts);
         assert_eq!(config.listen_address, "127.0.0.1");
         assert_eq!(config.allowed_origins, vec!["http://127.0.0.1:8080"]);
         assert_eq!(config.denied_origins, vec!["https://blocked.example"]);

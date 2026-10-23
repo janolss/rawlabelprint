@@ -6,7 +6,8 @@
 //! browsers can read success and 403 bodies.
 //!
 //! Requests without an Origin header and without browser `Sec-Fetch-*` metadata
-//! (curl/scripts) are allowed. Browser origins must be approved once in Settings.
+//! (curl/scripts) are allowed only when Settings enables local scripts.
+//! Browser origins must be approved once in Settings.
 
 use crate::http_server::response::{json_err_code, ORIGIN_DENIED};
 use crate::http_server::HttpSharedState;
@@ -123,7 +124,13 @@ pub async fn ensure_origin_allowed(
                 "Browser request is missing an Origin header.".into(),
             ));
         }
-        return Ok(());
+        if state.config.read().await.allow_local_scripts {
+            return Ok(());
+        }
+        return Err((
+            DENIED_STATUS,
+            "Local scripts are not allowed. Enable Allow local scripts in Settings, or use an approved website.".into(),
+        ));
     };
 
     {
@@ -231,11 +238,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_origin_is_allowed() {
+    async fn missing_origin_is_allowed_when_local_scripts_enabled() {
         let state = test_state(true, None);
         assert!(ensure_origin_allowed(&state, &HeaderMap::new())
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn missing_origin_is_denied_when_local_scripts_disabled() {
+        let state = test_state(true, None);
+        {
+            let mut cfg = state.config.write().await;
+            cfg.allow_local_scripts = false;
+        }
+        let err = ensure_origin_allowed(&state, &HeaderMap::new())
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert!(err.1.contains("Local scripts"));
     }
 
     #[tokio::test]
@@ -458,6 +479,23 @@ mod tests {
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn middleware_curl_without_origin_forbidden_when_local_scripts_off() {
+        let state = test_state(true, Some(sample_printer("10.0.0.1", "SN1")));
+        {
+            let mut cfg = state.config.write().await;
+            cfg.allow_local_scripts = false;
+        }
+        let app = build_test_router(state);
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = body_json(response).await;
+        assert_eq!(body["code"], "ORIGIN_DENIED");
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { buildOverviewHtml } from "./overview-view.ts";
 import { buildPrintLogHtml, escapeHtml } from "./print-log-view.ts";
 import {
   applyStatusBadgeDom,
@@ -31,20 +32,27 @@ function requireEl<T extends HTMLElement>(id: string): T {
 
 const els = {
   listenAddress: requireEl<HTMLInputElement>("listenAddress"),
+  listenAddressDisplay: requireEl<HTMLElement>("listenAddressDisplay"),
   port: requireEl<HTMLInputElement>("port"),
   browserPrintCompatible: requireEl<HTMLInputElement>("browserPrintCompatible"),
   debugLogging: requireEl<HTMLInputElement>("debugLogging"),
+  allowLocalScripts: requireEl<HTMLInputElement>("allowLocalScripts"),
   httpStatus: requireEl<HTMLElement>("httpStatus"),
   saveHttpBtn: requireEl<HTMLButtonElement>("saveHttpBtn"),
+  copyApiUrlBtn: requireEl<HTMLButtonElement>("copyApiUrlBtn"),
   savedList: requireEl<HTMLElement>("savedList"),
   searchBtn: requireEl<HTMLButtonElement>("searchBtn"),
   searchResults: requireEl<HTMLElement>("searchResults"),
+  toggleManualBtn: requireEl<HTMLButtonElement>("toggleManualBtn"),
+  manualForm: requireEl<HTMLElement>("manualForm"),
   manualName: requireEl<HTMLInputElement>("manualName"),
   manualAddress: requireEl<HTMLInputElement>("manualAddress"),
   manualPort: requireEl<HTMLInputElement>("manualPort"),
+  manualMakeDefault: requireEl<HTMLInputElement>("manualMakeDefault"),
   addManualBtn: requireEl<HTMLButtonElement>("addManualBtn"),
   virtualName: requireEl<HTMLInputElement>("virtualName"),
   virtualCapturePath: requireEl<HTMLInputElement>("virtualCapturePath"),
+  virtualMakeDefault: requireEl<HTMLInputElement>("virtualMakeDefault"),
   addVirtualBtn: requireEl<HTMLButtonElement>("addVirtualBtn"),
   launchAtLogin: requireEl<HTMLInputElement>("launchAtLogin"),
   apiUrl: requireEl<HTMLElement>("apiUrl"),
@@ -58,13 +66,21 @@ const els = {
   importPrintersBtn: requireEl<HTMLButtonElement>("importPrintersBtn"),
   importPrintersFile: requireEl<HTMLInputElement>("importPrintersFile"),
   transferStatus: requireEl<HTMLElement>("transferStatus"),
+  overviewRoot: requireEl<HTMLElement>("overviewRoot"),
+  navPrintersBadge: requireEl<HTMLElement>("navPrintersBadge"),
+  navSitesBadge: requireEl<HTMLElement>("navSitesBadge"),
 };
 
 let currentConfig: AppConfig | null = null;
 let lastDiscovered: PrinterInfo[] = [];
+let lastPrintLog: PrintLogEntry[] = [];
+let lastOriginPerms: OriginPermissions = { allowed: [], pending: [], denied: [] };
+let lastHttpStatusText = "…";
 const printerStatuses = new Map<string, UiPrinterStatus>();
 const statusCheckedAt = new Map<string, number>();
+const editingAddresses = new Set<string>();
 let statusRefreshSeq = 0;
+let savedPortValue = "9100";
 const STATUS_DEBOUNCE_MS = 30_000;
 const STATUS_CHECK_CONCURRENCY = 4;
 
@@ -72,19 +88,41 @@ function defaultAddress(): string | null {
   return currentConfig?.defaultPrinter?.address ?? null;
 }
 
+function hasDefaultPrinter(): boolean {
+  return !!currentConfig?.defaultPrinter;
+}
+
+function syncMakeDefaultCheckboxes(): void {
+  const checked = !hasDefaultPrinter();
+  els.manualMakeDefault.checked = checked;
+  els.virtualMakeDefault.checked = checked;
+}
+
+function savedAddressSet(): Set<string> {
+  return new Set((currentConfig?.addedPrinters || []).map((p) => p.address));
+}
+
 function updateApiUrl(): void {
   const host = els.listenAddress.value.trim() || "127.0.0.1";
   const port = els.port.value || "9100";
   els.apiUrl.textContent = `http://${host}:${port}/`;
+  els.listenAddressDisplay.textContent = host;
+}
+
+function updateSaveHttpBtn(): void {
+  els.saveHttpBtn.disabled = els.port.value === savedPortValue;
 }
 
 async function refreshHttpStatus(): Promise<void> {
   try {
     const status = await invoke<string>("get_http_status");
+    lastHttpStatusText = status;
     els.httpStatus.textContent = `Status: ${status}`;
   } catch (e) {
+    lastHttpStatusText = `error (${e})`;
     els.httpStatus.textContent = `Status: error (${e})`;
   }
+  renderOverview();
 }
 
 function updateStatusBadgeInDom(address: string): void {
@@ -93,6 +131,8 @@ function updateStatusBadgeInDom(address: string): void {
   );
   if (!el) return;
   applyStatusBadgeDom(el, printerStatuses.get(address));
+  updateNavBadges();
+  renderOverview();
 }
 
 function findSavedPrinter(address: string | undefined): PrinterInfo | undefined {
@@ -194,16 +234,90 @@ function fieldInput(card: Element, field: string): HTMLInputElement {
   return input;
 }
 
+function updateNavBadges(): void {
+  const pending = lastOriginPerms.pending.length;
+  if (pending > 0) {
+    els.navSitesBadge.textContent = String(pending);
+    els.navSitesBadge.classList.remove("hidden", "bad");
+    els.navSitesBadge.classList.add("warn");
+  } else {
+    els.navSitesBadge.textContent = "";
+    els.navSitesBadge.classList.add("hidden");
+  }
+
+  const def = defaultAddress();
+  const offline = def ? printerStatuses.get(def)?.kind === "offline" : false;
+  if (offline) {
+    els.navPrintersBadge.textContent = "!";
+    els.navPrintersBadge.classList.remove("hidden", "warn");
+    els.navPrintersBadge.classList.add("bad");
+  } else {
+    els.navPrintersBadge.textContent = "";
+    els.navPrintersBadge.classList.add("hidden");
+  }
+}
+
+function renderOverview(): void {
+  const defAddr = defaultAddress();
+  els.overviewRoot.innerHTML = buildOverviewHtml({
+    httpStatus: lastHttpStatusText,
+    defaultPrinter: currentConfig?.defaultPrinter ?? null,
+    defaultStatus: defAddr ? printerStatuses.get(defAddr) : undefined,
+    perms: lastOriginPerms,
+    lastLog: lastPrintLog[0] ?? null,
+  });
+}
+
 function renderSaved(list: PrinterInfo[] | null | undefined): void {
   els.savedList.innerHTML = buildSavedPrintersHtml(
     list,
     defaultAddress(),
-    printerStatuses
+    printerStatuses,
+    editingAddresses
   );
 
   els.savedList.querySelectorAll<HTMLElement>(".saved-card").forEach((card) => {
     const originalAddress = card.dataset.address;
     bindStatusBadgeClicks(card);
+
+    card.querySelector<HTMLButtonElement>('[data-action="edit"]')?.addEventListener(
+      "click",
+      () => {
+        if (!originalAddress) return;
+        if (editingAddresses.has(originalAddress)) {
+          editingAddresses.delete(originalAddress);
+        } else {
+          editingAddresses.add(originalAddress);
+        }
+        renderSaved(currentConfig?.addedPrinters || []);
+      }
+    );
+
+    card
+      .querySelector<HTMLButtonElement>('[data-action="recheck"]')
+      ?.addEventListener("click", () => {
+        if (originalAddress) void refreshPrinterStatus(originalAddress);
+      });
+
+    card
+      .querySelector<HTMLButtonElement>('[data-action="test"]')
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget as HTMLButtonElement;
+        const printer = findSavedPrinter(originalAddress);
+        const statusEl = card.querySelector<HTMLElement>("[data-test-status]");
+        if (!printer || !statusEl) return;
+        btn.disabled = true;
+        statusEl.innerHTML = `<span class="badge neutral">Printing…</span>`;
+        try {
+          await invoke("test_print", { printer });
+          statusEl.innerHTML = `<span class="badge ok">Test print sent</span>`;
+          await refreshPrintLog();
+        } catch (err) {
+          statusEl.innerHTML = `<span class="badge bad">${escapeHtml(String(err))}</span>`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
 
     const saveBtn = card.querySelector<HTMLButtonElement>('[data-action="save"]');
     saveBtn?.addEventListener("click", async (e) => {
@@ -221,9 +335,11 @@ function renderSaved(list: PrinterInfo[] | null | undefined): void {
             return Number(portEl.value) || 9100;
           })(),
           capturePath: virtual
-            ? card.querySelector<HTMLInputElement>('[data-field="capturePath"]')?.value.trim() ?? ""
+            ? card.querySelector<HTMLInputElement>('[data-field="capturePath"]')?.value.trim() ??
+              ""
             : null,
         });
+        if (originalAddress) editingAddresses.delete(originalAddress);
         applyConfig(currentConfig);
         await refreshAllPrinterStatuses();
       } catch (err) {
@@ -265,7 +381,10 @@ function renderSaved(list: PrinterInfo[] | null | undefined): void {
         currentConfig = await invoke<AppConfig>("remove_added_printer", {
           address: originalAddress,
         });
-        if (originalAddress) printerStatuses.delete(originalAddress);
+        if (originalAddress) {
+          printerStatuses.delete(originalAddress);
+          editingAddresses.delete(originalAddress);
+        }
         applyConfig(currentConfig);
       } catch (err) {
         btn.disabled = false;
@@ -276,12 +395,15 @@ function renderSaved(list: PrinterInfo[] | null | undefined): void {
       }
     });
   });
+  updateNavBadges();
 }
 
 function applyConfig(config: AppConfig): void {
   currentConfig = config;
   els.listenAddress.value = "127.0.0.1";
   els.port.value = String(config.port ?? 9100);
+  savedPortValue = els.port.value;
+  updateSaveHttpBtn();
   els.launchAtLogin.checked = !!config.launchAtLogin;
   // Dev (`tauri dev`) must not register LaunchAgent against target/debug.
   if (import.meta.env.DEV) {
@@ -293,8 +415,11 @@ function applyConfig(config: AppConfig): void {
   }
   els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
   els.debugLogging.checked = !!config.debugLogging;
+  els.allowLocalScripts.checked = !!config.allowLocalScripts;
   renderSaved(config.addedPrinters || []);
+  syncMakeDefaultCheckboxes();
   updateApiUrl();
+  renderOverview();
 }
 
 async function persistSettings(): Promise<AppConfig> {
@@ -304,14 +429,18 @@ async function persistSettings(): Promise<AppConfig> {
     launchAtLogin: els.launchAtLogin.checked,
     browserPrintCompatible: els.browserPrintCompatible.checked,
     debugLogging: els.debugLogging.checked,
+    allowLocalScripts: els.allowLocalScripts.checked,
   });
 }
 
 function renderPrintLog(entries: PrintLogEntry[]): void {
+  lastPrintLog = entries;
   els.printLogList.innerHTML = buildPrintLogHtml(entries);
+  renderOverview();
 }
 
 function renderOriginPermissions(perms: OriginPermissions): void {
+  lastOriginPerms = perms;
   if (!perms.pending.length) {
     els.originPendingList.innerHTML = "";
   } else {
@@ -365,6 +494,8 @@ function renderOriginPermissions(perms: OriginPermissions): void {
       )
       .join("");
   }
+  updateNavBadges();
+  renderOverview();
 }
 
 async function refreshOriginPermissions(): Promise<void> {
@@ -387,6 +518,34 @@ async function refreshPrintLog(): Promise<void> {
   }
 }
 
+function showPane(name: string): void {
+  document.querySelectorAll<HTMLElement>(".nav-item").forEach((item) => {
+    const active = item.dataset.pane === name;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  document.querySelectorAll<HTMLElement>(".pane").forEach((pane) => {
+    const active = pane.dataset.pane === name;
+    pane.classList.toggle("active", active);
+    pane.hidden = !active;
+  });
+  if (name === "prints") {
+    refreshPrintLog().catch((e) => console.error(e));
+  }
+}
+
+function highlightPendingOrigin(origin?: string): void {
+  const rows = [...els.originPendingList.querySelectorAll<HTMLElement>(".origin-row")];
+  const target = origin
+    ? rows.find((row) => row.dataset.origin === origin)
+    : rows[0];
+  if (!target) return;
+  target.classList.add("highlight");
+  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  window.setTimeout(() => target.classList.remove("highlight"), 2500);
+}
+
 async function load(): Promise<void> {
   const config = await invoke<AppConfig>("get_config");
   applyConfig(config);
@@ -405,7 +564,19 @@ els.saveHttpBtn.addEventListener("click", async () => {
   } catch (e) {
     els.httpStatus.textContent = `Status: error (${e})`;
   } finally {
-    els.saveHttpBtn.disabled = false;
+    updateSaveHttpBtn();
+  }
+});
+
+els.copyApiUrlBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(els.apiUrl.textContent || "");
+    els.copyApiUrlBtn.textContent = "Copied";
+    window.setTimeout(() => {
+      els.copyApiUrlBtn.textContent = "Copy";
+    }, 1500);
+  } catch (e) {
+    console.error(e);
   }
 });
 
@@ -495,6 +666,15 @@ els.debugLogging.addEventListener("change", async () => {
   }
 });
 
+els.allowLocalScripts.addEventListener("change", async () => {
+  try {
+    currentConfig = await persistSettings();
+  } catch (e) {
+    console.error(e);
+    if (currentConfig) applyConfig(currentConfig);
+  }
+});
+
 els.refreshPrintLogBtn.addEventListener("click", () => {
   refreshPrintLog().catch((e) => console.error(e));
 });
@@ -536,45 +716,32 @@ async function handleOriginAction(
   }
 }
 
-els.originPendingList.addEventListener("click", (e) => {
-  const target = e.target;
-  if (!(target instanceof Element)) return;
-  const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
-  if (!btn) return;
-  const row = btn.closest<HTMLElement>("[data-origin]");
-  const origin = row?.dataset.origin;
-  const action = btn.dataset.originAction;
-  if (!origin || !action) return;
-  void handleOriginAction(action, origin, btn);
-});
+function bindOriginListClicks(list: HTMLElement): void {
+  list.addEventListener("click", (e) => {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
+    if (!btn) return;
+    const row = btn.closest<HTMLElement>("[data-origin]");
+    const origin = row?.dataset.origin;
+    const action = btn.dataset.originAction;
+    if (!origin || !action) return;
+    void handleOriginAction(action, origin, btn);
+  });
+}
 
-els.originDeniedList.addEventListener("click", (e) => {
-  const target = e.target;
-  if (!(target instanceof Element)) return;
-  const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
-  if (!btn) return;
-  const row = btn.closest<HTMLElement>("[data-origin]");
-  const origin = row?.dataset.origin;
-  const action = btn.dataset.originAction;
-  if (!origin || !action) return;
-  void handleOriginAction(action, origin, btn);
-});
+bindOriginListClicks(els.originPendingList);
+bindOriginListClicks(els.originDeniedList);
+bindOriginListClicks(els.originAllowedList);
 
-els.originAllowedList.addEventListener("click", (e) => {
-  const target = e.target;
-  if (!(target instanceof Element)) return;
-  const btn = target.closest<HTMLButtonElement>("[data-origin-action]");
-  if (!btn) return;
-  const row = btn.closest<HTMLElement>("[data-origin]");
-  const origin = row?.dataset.origin;
-  const action = btn.dataset.originAction;
-  if (!origin || !action) return;
-  void handleOriginAction(action, origin, btn);
-});
-
-void listen("origin-pending", () => {
-  document.querySelector<HTMLButtonElement>('[data-tab="general"]')?.click();
-  refreshOriginPermissions().catch((e) => console.error(e));
+void listen("origin-pending", (event) => {
+  showPane("sites");
+  refreshOriginPermissions()
+    .then(() => {
+      const origin = typeof event.payload === "string" ? event.payload : undefined;
+      highlightPendingOrigin(origin);
+    })
+    .catch((e) => console.error(e));
 });
 
 els.printLogList.addEventListener("click", async (e) => {
@@ -596,6 +763,11 @@ els.printLogList.addEventListener("click", async (e) => {
   }
 });
 
+els.toggleManualBtn.addEventListener("click", () => {
+  const open = els.manualForm.classList.toggle("hidden") === false;
+  els.toggleManualBtn.textContent = open ? "Hide manual form" : "Add manually";
+});
+
 els.searchBtn.addEventListener("click", async () => {
   els.searchBtn.disabled = true;
   els.searchResults.classList.remove("hidden");
@@ -606,12 +778,24 @@ els.searchBtn.addEventListener("click", async () => {
       els.searchResults.innerHTML = buildNoPrintersHtml();
       return;
     }
-    els.searchResults.innerHTML = buildSearchResultsHtml(lastDiscovered);
+    els.searchResults.innerHTML = buildSearchResultsHtml(
+      lastDiscovered,
+      savedAddressSet(),
+      !hasDefaultPrinter()
+    );
 
     els.searchResults.querySelectorAll<HTMLButtonElement>("[data-save-idx]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        const printer = lastDiscovered[Number(btn.dataset.saveIdx)];
-        currentConfig = await invoke<AppConfig>("set_default_printer", { printer });
+        const idx = Number(btn.dataset.saveIdx);
+        const printer = lastDiscovered[idx];
+        const makeDefault =
+          els.searchResults.querySelector<HTMLInputElement>(
+            `[data-make-default-idx="${idx}"]`
+          )?.checked ?? false;
+        currentConfig = await invoke<AppConfig>("save_printer", {
+          printer,
+          makeDefault,
+        });
         applyConfig(currentConfig);
         els.searchResults.classList.add("hidden");
         await refreshAllPrinterStatuses();
@@ -666,6 +850,7 @@ els.addVirtualBtn.addEventListener("click", async () => {
     currentConfig = await invoke<AppConfig>("add_virtual_printer", {
       name,
       capturePath: els.virtualCapturePath.value.trim(),
+      makeDefault: els.virtualMakeDefault.checked,
     });
     applyConfig(currentConfig);
     els.virtualName.value = "";
@@ -690,11 +875,14 @@ els.addManualBtn.addEventListener("click", async () => {
       name: els.manualName.value.trim(),
       address,
       printPort: Number(els.manualPort.value) || 9100,
+      makeDefault: els.manualMakeDefault.checked,
     });
     applyConfig(currentConfig);
     els.manualName.value = "";
     els.manualAddress.value = "";
     els.manualPort.value = "9100";
+    els.manualForm.classList.add("hidden");
+    els.toggleManualBtn.textContent = "Add manually";
     await refreshAllPrinterStatuses();
   } catch (e) {
     alert(String(e));
@@ -703,25 +891,34 @@ els.addManualBtn.addEventListener("click", async () => {
   }
 });
 
-els.port.addEventListener("input", updateApiUrl);
+els.port.addEventListener("input", () => {
+  updateApiUrl();
+  updateSaveHttpBtn();
+});
 
-document.querySelectorAll<HTMLElement>(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    const name = tab.dataset.tab;
-    document.querySelectorAll<HTMLElement>(".tab").forEach((t) => {
-      const active = t.dataset.tab === name;
-      t.classList.toggle("active", active);
-      t.setAttribute("aria-selected", active ? "true" : "false");
-    });
-    document.querySelectorAll<HTMLElement>(".tab-panel").forEach((panel) => {
-      const active = panel.dataset.panel === name;
-      panel.classList.toggle("active", active);
-      panel.hidden = !active;
-    });
-    if (name === "general") {
-      refreshPrintLog().catch((e) => console.error(e));
-    }
+document.querySelectorAll<HTMLElement>(".nav-item").forEach((item) => {
+  item.addEventListener("click", () => {
+    const name = item.dataset.pane;
+    if (name) showPane(name);
   });
+});
+
+els.overviewRoot.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const btn = target.closest<HTMLButtonElement>("[data-overview-action]");
+  if (!btn) return;
+  const action = btn.dataset.overviewAction;
+  if (action === "goto-printers") showPane("printers");
+  if (action === "goto-sites") showPane("sites");
+  if (action === "goto-prints") showPane("prints");
+  if (action === "copy-api") {
+    void navigator.clipboard.writeText(els.apiUrl.textContent || "").catch(console.error);
+  }
+  if (action === "recheck-default") {
+    const addr = defaultAddress();
+    if (addr) void refreshPrinterStatus(addr);
+  }
 });
 
 getCurrentWindow()

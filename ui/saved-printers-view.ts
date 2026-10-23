@@ -41,22 +41,48 @@ export function applyStatusBadgeDom(
   }
 }
 
+function sortDefaultFirst(
+  list: PrinterInfo[],
+  defaultAddress: string | null
+): PrinterInfo[] {
+  if (!defaultAddress) return [...list];
+  return [...list].sort((a, b) => {
+    const aDef = a.address === defaultAddress ? 0 : 1;
+    const bDef = b.address === defaultAddress ? 0 : 1;
+    return aDef - bDef;
+  });
+}
+
+function locationLabel(p: PrinterInfo): string {
+  if (isVirtualPrinter(p)) {
+    return p.capturePath?.trim() ? escapeHtml(p.capturePath) : "Virtual";
+  }
+  if (isUsbPrinter(p)) return escapeHtml(p.address);
+  return `${escapeHtml(p.address)}:${escapeHtml(p.printPort)}`;
+}
+
 export function buildSavedPrintersHtml(
   list: PrinterInfo[] | null | undefined,
   defaultAddress: string | null,
-  statuses: Map<string, UiPrinterStatus>
+  statuses: Map<string, UiPrinterStatus>,
+  editingAddresses: Set<string> = new Set()
 ): string {
   if (!list?.length) {
     return `<div class="printer-card muted">No saved printers yet. Search on LAN/USB or add manually.</div>`;
   }
 
-  return list
+  return sortDefaultFirst(list, defaultAddress)
     .map((p) => {
       const isDefault = p.address === defaultAddress;
       const nameValue = p.name?.trim() ? p.name : "";
       const usb = isUsbPrinter(p);
       const virtual = isVirtualPrinter(p);
       const kind = virtual ? "Virtual" : usb ? "USB" : "Network";
+      const editing = editingAddresses.has(p.address);
+      const showModel =
+        !!p.model &&
+        p.model !== "Manual" &&
+        p.model.trim() !== (p.name?.trim() || "");
       const portRow =
         usb || virtual
           ? ""
@@ -76,22 +102,33 @@ export function buildSavedPrintersHtml(
       return `
       <div class="saved-card" data-address="${escapeHtml(p.address)}" data-connection="${escapeHtml(p.connection || "network")}">
         <div class="saved-header">
-          <strong>${escapeHtml(displayName(p))}</strong>
+          <div class="saved-title">
+            <strong>${escapeHtml(displayName(p))}</strong>
+            <span class="saved-meta"> · ${locationLabel(p)}</span>
+          </div>
           ${isDefault ? `<span class="badge ok">Default</span>` : ""}
           <span class="badge neutral">${kind}</span>
           ${statusBadgeHtml(p.address, statuses)}
-          ${p.model && p.model !== "Manual" ? `<span class="badge neutral">${escapeHtml(p.model)}</span>` : ""}
+          ${showModel ? `<span class="badge neutral">${escapeHtml(p.model)}</span>` : ""}
+          <div class="saved-actions">
+            <button type="button" data-action="recheck" title="Recheck status">↻</button>
+            <button type="button" data-action="test">Test print</button>
+            <button type="button" data-action="edit">${editing ? "Done" : "Edit"}</button>
+          </div>
         </div>
-        <div class="row">
-          <label>Name</label>
-          <input type="text" data-field="name" value="${escapeHtml(nameValue)}" placeholder="${escapeHtml(p.model || p.address)}" />
-        </div>
-        ${locationRow}
-        ${portRow}
-        <div class="button-row">
-          <button type="button" data-action="save">Save changes</button>
-          ${isDefault ? "" : `<button type="button" class="primary" data-action="default">Set as default</button>`}
-          <button type="button" data-action="remove">Remove</button>
+        <div class="saved-test-status" data-test-status></div>
+        <div class="saved-edit${editing ? "" : " hidden"}">
+          <div class="row">
+            <label>Name</label>
+            <input type="text" data-field="name" value="${escapeHtml(nameValue)}" placeholder="${escapeHtml(p.model || p.address)}" />
+          </div>
+          ${locationRow}
+          ${portRow}
+          <div class="button-row">
+            <button type="button" class="primary" data-action="save">Save changes</button>
+            ${isDefault ? "" : `<button type="button" data-action="default">Set as default</button>`}
+            <button type="button" data-action="remove">Remove</button>
+          </div>
         </div>
       </div>`;
     })
