@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "RawLabelPrint",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "identifier": "se.rawlabelprint.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run docs:getting-started && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run docs:getting-started && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,6 +34,9 @@
     "category": "Utility",
     "shortDescription": "Raw label printing from the browser",
     "longDescription": "Tray application that exposes a localhost HTTP API for sending raw label data directly to Zebra printers on the LAN.",
+    "resources": {
+      "../docs/getting-started.html": "docs/getting-started.html"
+    },
     "macOS": {
       "minimumSystemVersion": "12.0",
       "infoPlist": "Info.plist",

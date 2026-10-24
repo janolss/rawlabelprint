@@ -1,7 +1,7 @@
 {
   "name": "rawlabelprint",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -9,6 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "docs:getting-started": "node scripts/render-getting-started.mjs",
+    "docs:getting-started:check": "node scripts/render-getting-started.mjs --check",
     "version": "node scripts/sync-version.mjs && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock",
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check",
@@ -16,13 +18,14 @@
     "typecheck:browserprint": "npm run typecheck --prefix browserprint-client",
     "build:browserprint": "npm run build --prefix browserprint-client",
     "lint:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
-    "lint": "npm run lint:rust && npm run typecheck",
+    "lint": "npm run lint:rust && npm run typecheck && npm run docs:getting-started:check",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml && npm run test:ui && npm run test:browserprint",
     "test:ui": "node --import tsx --test ui/*.test.ts",
     "test:browserprint": "npm test --prefix browserprint-client"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "marked": "^17.0.6",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8"

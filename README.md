@@ -2,6 +2,8 @@
 
 macOS (Apple Silicon), Linux (Pop!_OS / Ubuntu 24.04+) and Windows 10/11 tray app for browser-based raw label printing.
 
+**End users:** see [Getting Started](docs/getting-started.md) (tray **Getting Started…** opens the HTML render in your browser). Edit the Markdown, then run `npm run docs:getting-started` (also runs before `tauri` build/dev).
+
 The app:
 
 - Lives in the menu bar / system tray

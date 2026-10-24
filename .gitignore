@@ -33,5 +33,3 @@ rag-mcp/*
 # Tauri / Rust
 src-tauri/target
 tauri.gitignore
-docs/*
-!docs/config.schema.json

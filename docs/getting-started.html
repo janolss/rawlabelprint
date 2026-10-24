@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Getting Started — RawLabelPrint</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1a1a1a;
+      --muted: #555;
+      --border: #ccc;
+      --bg: #fff;
+      --code-bg: #f4f4f4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e8e8e8;
+        --muted: #aaa;
+        --border: #444;
+        --bg: #1c1c1c;
+        --code-bg: #2a2a2a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 3rem;
+      max-width: 42rem;
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+    }
+    h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 0.75rem; }
+    h2 { font-size: 1.2rem; margin: 1.75rem 0 0.5rem; }
+    p, li { margin: 0.4rem 0; }
+    ul, ol { padding-left: 1.25rem; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+    strong { font-weight: 600; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      background: var(--code-bg);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.75rem 0 1rem;
+      font-size: 0.95rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.45rem 0.6rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { font-weight: 600; }
+    .source {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    @media print {
+      body { max-width: none; padding: 0; color: #000; background: #fff; }
+      .source { display: none; }
+    }
+  </style>
+</head>
+<body>
+<!-- Source for the tray “Getting Started…” page. Run: npm run docs:getting-started -->
+
+<h1>Getting Started with RawLabelPrint</h1>
+<p>RawLabelPrint is a small background app for <strong>macOS</strong>, <strong>Windows</strong>, and <strong>Linux</strong>. It lives in the menu bar / system tray and lets approved websites send raw label data (ZPL/EPL) straight to your saved Zebra printers.</p>
+<p>You do not print through the normal system print dialog (CUPS). The website talks to RawLabelPrint on this computer, and RawLabelPrint talks to the printer.</p>
+<hr>
+<h2>1. Open Settings</h2>
+<ol>
+<li>Launch <strong>RawLabelPrint</strong>. An icon appears in the menu bar (macOS) or system tray (Windows / Linux).</li>
+<li>Click the icon, or open the tray menu and choose <strong>Settings…</strong>.</li>
+</ol>
+<p>Closing the Settings window hides it; the app keeps running. Use <strong>Quit</strong> in the tray menu to stop it.</p>
+<p>On Windows the icon may sit in the taskbar overflow area (^). Drag it out so it stays visible.</p>
+<hr>
+<h2>2. Add your first printer</h2>
+<ol>
+<li>In Settings, open <strong>Printers</strong>.</li>
+<li>Click <strong>Search Zebra printers</strong> and wait a few seconds (LAN and USB).</li>
+<li>On the printer you want: optionally <strong>Test connection</strong>, check <strong>Make default</strong>, then <strong>Save</strong>.</li>
+</ol>
+<p>A search result is <strong>not</strong> available to websites until you save it.</p>
+<p><strong>Alternatives</strong></p>
+<ul>
+<li><strong>Add manually</strong> — name, IP address, and print port (usually <code>9100</code>).</li>
+<li><strong>Virtual printer</strong> — for testing without hardware (jobs appear under <strong>Prints</strong>).</li>
+</ul>
+<p>Use <strong>Test print</strong> on a saved printer to confirm RawLabelPrint can reach it. Status shows <strong>Online</strong> or <strong>Offline</strong>; use <strong>↻</strong> to recheck.</p>
+<hr>
+<h2>3. Approve websites that print</h2>
+<p>The first time a website lists printers or sends a print job, RawLabelPrint blocks it until you allow that site.</p>
+<ol>
+<li>Try printing (or listing printers) from the website.</li>
+<li>Settings opens on <strong>Websites</strong>, with the site under <strong>Pending</strong>.</li>
+<li>Click <strong>Allow</strong>, then try again from the website.</li>
+</ol>
+<p>You can <strong>Deny</strong> a site, or <strong>Remove</strong> an allowed/denied entry later. Only <strong>Allowed</strong> sites may print (unless you enable <strong>Allow local scripts</strong> for tools like curl — leave that off for normal browser use).</p>
+<hr>
+<h2>4. If nothing prints</h2>
+<p>Work through this short checklist:</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Is RawLabelPrint running?</td>
+<td>Look for the tray icon. Launch the app if it is missing.</td>
+</tr>
+<tr>
+<td>Is a printer saved and set as default?</td>
+<td><strong>Printers</strong> — save at least one printer; set a default if the website does not name a printer.</td>
+</tr>
+<tr>
+<td>Is the printer Online?</td>
+<td><strong>Test print</strong> or <strong>↻</strong>. Fix network/USB, then try again.</td>
+</tr>
+<tr>
+<td>Is the website Allowed?</td>
+<td><strong>Websites</strong> — pending sites need <strong>Allow</strong>; <strong>Denied</strong> sites stay blocked until removed.</td>
+</tr>
+<tr>
+<td>Did the request reach the app?</td>
+<td>Enable <strong>Capture recent print requests</strong> on the <strong>Prints</strong> page, print again, and check <strong>Recent prints</strong>.</td>
+</tr>
+</tbody></table>
+<p><strong>Platform tips</strong></p>
+<ul>
+<li><strong>macOS:</strong> Allow RawLabelPrint under <strong>System Settings → Privacy &amp; Security → Local Network</strong> if discovery or TCP to the printer fails.</li>
+<li><strong>Windows:</strong> Allow the app through Windows Firewall (private networks) so printer search works.</li>
+<li><strong>USB:</strong> Run <strong>Search Zebra printers</strong> after plugging in; the printer must appear as a CDC/ACM (serial/COM) device.</li>
+</ul>
+<p>Still stuck? Ask your IT contact, or see the project README for technical detail.</p>
+
+<p class="source">Generated from <code>docs/getting-started.md</code>.</p>
+</body>
+</html>

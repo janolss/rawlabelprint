@@ -19,13 +19,19 @@ use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissio
 use print::{get_printer_status, PrinterStatus};
 use print_log::PrintLogSummary;
 use state::AppState;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::path::BaseDirectory;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_opener::OpenerExt;
 use update_check::{UpdateState, UpdateStatus};
 use usb_discovery::search_all_printers;
+
+/// Rendered HTML (from `docs/getting-started.md` via `npm run docs:getting-started`).
+const GETTING_STARTED_REL: &str = "docs/getting-started.html";
 
 /// LaunchAgent must not point at `target/debug` (breaks Local Network / identity).
 fn autostart_registration_allowed() -> bool {
@@ -432,6 +438,43 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
+/// Bundled resource in release; repo file next to `src-tauri` in `tauri dev`.
+fn getting_started_path(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(bundled) = app
+        .path()
+        .resolve(GETTING_STARTED_REL, BaseDirectory::Resource)
+    {
+        if bundled.is_file() {
+            return Ok(bundled);
+        }
+    }
+
+    let dev = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(GETTING_STARTED_REL);
+    let dev = dev
+        .canonicalize()
+        .map_err(|err| format!("Getting Started guide not found: {err}"))?;
+    if dev.is_file() {
+        return Ok(dev);
+    }
+    Err(format!(
+        "Getting Started guide not found at {}",
+        dev.display()
+    ))
+}
+
+fn open_getting_started(app: &AppHandle) {
+    match getting_started_path(app) {
+        Ok(path) => {
+            if let Err(err) = app.opener().open_path(path.to_string_lossy(), None::<&str>) {
+                tracing::error!("Failed to open Getting Started guide: {err}");
+            }
+        }
+        Err(err) => tracing::error!("{err}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -533,8 +576,15 @@ pub fn run() {
                 MenuItem::with_id(app, "app_name", "RawLabelPrint", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let show_i = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let help_i = MenuItem::with_id(
+                app,
+                "getting_started",
+                "Getting Started…",
+                true,
+                None::<&str>,
+            )?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &help_i, &quit_i])?;
 
             let tray_tooltip = format!("RawLabelPrint {}", env!("CARGO_PKG_VERSION"));
             // Black + alpha template. macOS tints it. Linux draws the pixmap as-is,
@@ -554,6 +604,7 @@ pub fn run() {
                 .tooltip(&tray_tooltip)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "app_name" | "settings" => show_settings(app),
+                    "getting_started" => open_getting_started(app),
                     update_check::TRAY_ITEM_ID => update_check::activate_tray_item(app),
                     "quit" => app.exit(0),
                     _ => {}
@@ -624,4 +675,26 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running RawLabelPrint");
+}
+
+#[cfg(test)]
+mod getting_started_tests {
+    use super::GETTING_STARTED_REL;
+    use std::path::Path;
+
+    #[test]
+    fn guide_exists_in_repo() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(GETTING_STARTED_REL);
+        assert!(
+            path.is_file(),
+            "expected {} (run npm run docs:getting-started)",
+            path.display()
+        );
+        let md = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("docs/getting-started.md");
+        assert!(md.is_file(), "markdown source missing: {}", md.display());
+    }
 }
