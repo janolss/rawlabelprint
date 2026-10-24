@@ -219,6 +219,7 @@ fn apply(app: &AppHandle, signals: TraySignals) {
 }
 
 /// Rebuild icon only (Linux theme changes) using the last applied kind.
+#[cfg(target_os = "linux")]
 pub fn reapply_icon(app: &AppHandle) {
     let Some(state) = app.try_state::<TrayStatusState>() else {
         return;
@@ -233,6 +234,11 @@ fn apply_icon(app: &AppHandle, state: &TrayStatusState, kind: TrayKind) -> tauri
     let style = platform_style(state);
     let image = tray_icon::build(kind, style)?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        // tray-icon's set_icon always passes is_template=false on macOS, so the
+        // black silhouette would render literally (invisible on a dark menu bar).
+        #[cfg(target_os = "macos")]
+        tray.set_icon_with_as_template(Some(image), true)?;
+        #[cfg(not(target_os = "macos"))]
         tray.set_icon(Some(image))?;
     }
     Ok(())
