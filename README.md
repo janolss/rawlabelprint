@@ -142,9 +142,23 @@ The app browses Bonjour (`_printer._tcp`) at startup to trigger that prompt (men
 
 UDP discovery can succeed while TCP `:9100` still fails with `No route to host (os error 65)` until Local Network is fully granted for the same `.app` you actually run (prefer one install: `/Applications/RawLabelPrint.app`, not a `target/release/...` copy).
 
+### Tray status (all platforms)
+
+The tray icon has three states:
+
+| State | Looks like | When |
+| --- | --- | --- |
+| Idle | Normal glyph | Nothing needs attention |
+| Attention | Dot badge (coloured on Linux/Windows; silhouette on macOS) | Update available, or a website is waiting for print approval |
+| Error | Alert badge | Default printer is offline / unreachable |
+
+Priority is **error > attention > idle**. Tooltip and tray menu rows spell out the reasons. A website that needs approval still opens **Settings** automatically; the attention icon remains if you close the window without deciding.
+
+Desktop notifications fire once when a reason becomes active (not on every status poll). Allow notifications for RawLabelPrint in the OS if prompted. On Windows, notifications work reliably for installed builds (dev runs may show a PowerShell name/icon).
+
 ### Linux system tray
 
-Pop!_OS typically includes AppIndicator support. On plain GNOME without an AppIndicator extension, the tray icon may be missing — the app still runs and can be opened from the application menu (desktop entry).
+Pop!_OS typically includes AppIndicator support. On plain GNOME without an AppIndicator extension, the tray icon may be missing — the app still runs and can be opened from the application menu (desktop entry). The tray glyph flips black/white with the desktop colour scheme; status badges stay coloured.
 
 ### Windows tray and firewall
 

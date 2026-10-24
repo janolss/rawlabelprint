@@ -11,6 +11,7 @@
     "core:window:allow-set-focus",
     "core:tray:default",
     "opener:default",
+    "notification:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

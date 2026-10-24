@@ -3,18 +3,17 @@
 //! The bundled icon is a black template. macOS tints templates in the menu bar.
 //! StatusNotifier hosts (COSMIC, GNOME AppIndicator, KDE) draw the pixmap unchanged,
 //! so the same shape is painted white when the desktop prefers a dark appearance.
+//! Attention/error badges are composited in `tray_icon` and must be redrawn on theme change.
 
+use crate::tray_status::{self, TrayStatusState};
 use std::future::poll_fn;
 use std::pin::Pin;
-use tauri::image::Image;
-use tauri::tray::TrayIcon;
-use tauri::Runtime;
+use tauri::{AppHandle, Manager};
 use zbus::export::futures_core::stream::Stream;
 use zbus::{Connection, OwnedVariant, Variant};
 
 const APPEARANCE_NS: &str = "org.freedesktop.appearance";
 const COLOR_SCHEME_KEY: &str = "color-scheme";
-const TRAY_PNG: &[u8] = include_bytes!("../icons/tray.png");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ColorScheme {
@@ -36,16 +35,6 @@ trait PortalSettings {
     fn setting_changed(&self, namespace: &str, key: &str, value: OwnedVariant) -> zbus::Result<()>;
 }
 
-pub fn icon(on_dark: bool) -> tauri::Result<Image<'static>> {
-    let image = Image::from_bytes(TRAY_PNG)?;
-    if !on_dark {
-        return Ok(image);
-    }
-    let mut rgba = image.rgba().to_vec();
-    paint_template_white(&mut rgba);
-    Ok(Image::new_owned(rgba, image.width(), image.height()))
-}
-
 /// `true` when the desktop color scheme is dark.
 ///
 /// Uses the XDG settings portal (`color-scheme` 1). If the portal reports no
@@ -62,11 +51,11 @@ pub fn prefers_dark_ui() -> bool {
 }
 
 /// Keep the tray glyph in sync when the user switches light/dark.
-pub fn follow_color_scheme<R: Runtime>(tray: TrayIcon<R>) {
+pub fn follow_color_scheme(app: AppHandle) {
     if let Err(err) = std::thread::Builder::new()
         .name("tray-theme".into())
         .spawn(move || {
-            if let Err(err) = zbus::block_on(watch(tray)) {
+            if let Err(err) = zbus::block_on(watch(app)) {
                 tracing::warn!("Tray color-scheme watcher stopped: {err}");
             }
         })
@@ -75,10 +64,11 @@ pub fn follow_color_scheme<R: Runtime>(tray: TrayIcon<R>) {
     }
 }
 
-async fn watch<R: Runtime>(tray: TrayIcon<R>) -> zbus::Result<()> {
+async fn watch(app: AppHandle) -> zbus::Result<()> {
     let connection = Connection::session().await?;
     let proxy = PortalSettingsProxy::new(&connection).await?;
     let mut dark = scheme_is_dark(read_scheme(&proxy).await?);
+    apply_dark(&app, dark);
     let mut signals = proxy.receive_setting_changed().await?;
     while let Some(signal) = poll_fn(|cx| Pin::new(&mut signals).poll_next(cx)).await {
         let args = signal.args()?;
@@ -90,16 +80,16 @@ async fn watch<R: Runtime>(tray: TrayIcon<R>) -> zbus::Result<()> {
             continue;
         }
         dark = next;
-        match icon(dark) {
-            Ok(image) => {
-                if let Err(err) = tray.set_icon(Some(image)) {
-                    tracing::warn!("Failed to update tray icon: {err}");
-                }
-            }
-            Err(err) => tracing::warn!("Failed to build tray icon: {err}"),
-        }
+        apply_dark(&app, dark);
     }
     Ok(())
+}
+
+fn apply_dark(app: &AppHandle, dark: bool) {
+    if let Some(state) = app.try_state::<TrayStatusState>() {
+        state.set_on_dark(dark);
+    }
+    tray_status::reapply_icon(app);
 }
 
 fn read_portal_scheme() -> zbus::Result<ColorScheme> {
@@ -176,19 +166,11 @@ fn theme_name_is_dark(theme: &str) -> bool {
         .any(|part| part.eq_ignore_ascii_case("dark"))
 }
 
-fn paint_template_white(rgba: &mut [u8]) {
-    for px in rgba.as_chunks_mut::<4>().0 {
-        if px[3] != 0 {
-            px[0] = 255;
-            px[1] = 255;
-            px[2] = 255;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tray_icon::{self, PlatformStyle, TrayKind};
+    use tauri::image::Image;
 
     #[test]
     fn portal_codes_map_to_scheme() {
@@ -215,20 +197,16 @@ mod tests {
     }
 
     #[test]
-    fn white_template_keeps_alpha() {
-        let source = Image::from_bytes(TRAY_PNG).unwrap();
-        let mut rgba = source.rgba().to_vec();
+    fn dark_idle_icon_is_white_glyph() {
+        let image =
+            tray_icon::build(TrayKind::Idle, PlatformStyle::Linux { on_dark: true }).unwrap();
+        let rgba = image.rgba();
         assert!(rgba
             .as_chunks::<4>()
             .0
             .iter()
-            .any(|px| px[3] > 0 && px[0] < 32));
-        paint_template_white(&mut rgba);
-        for px in rgba.as_chunks::<4>().0 {
-            if px[3] != 0 {
-                assert_eq!(&px[..3], &[255, 255, 255]);
-            }
-        }
-        assert!(rgba.as_chunks::<4>().0.iter().any(|px| px[3] == 0));
+            .any(|px| px[3] > 0 && px[0] == 255 && px[1] == 255 && px[2] == 255));
+        // Still a valid Image so theme watcher can call set_icon.
+        let _: &Image<'_> = &image;
     }
 }
