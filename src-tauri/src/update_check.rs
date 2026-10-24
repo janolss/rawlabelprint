@@ -162,6 +162,8 @@ pub async fn check_now(app: &AppHandle) -> UpdateStatus {
         if AUTO_DOWNLOAD && !status.ready_to_install {
             spawn_download(app.clone());
         }
+    } else {
+        crate::tray_status::schedule_refresh(app);
     }
     status
 }
@@ -171,6 +173,7 @@ fn notify(app: &AppHandle, state: &UpdateState, status: &UpdateStatus) {
         tracing::error!("Failed to update tray for new version: {err}");
     }
     let _ = app.emit("update-available", status);
+    crate::tray_status::schedule_refresh(app);
 }
 
 /// Fetches `latest.json` through the updater plugin, downloads and verifies the installer,
@@ -259,12 +262,6 @@ fn sync_tray(app: &AppHandle, state: &UpdateState, status: &UpdateStatus) -> tau
             state.menu.insert(&created, 1)?;
             *item = Some(created);
         }
-    }
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        tray.set_tooltip(Some(format!(
-            "RawLabelPrint {} – update {latest} available",
-            status.current
-        )))?;
     }
     Ok(())
 }

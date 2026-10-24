@@ -8,6 +8,8 @@ mod local_network;
 mod print;
 mod print_log;
 mod state;
+mod tray_icon;
+mod tray_status;
 mod update_check;
 mod usb_discovery;
 
@@ -27,6 +29,8 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_opener::OpenerExt;
+use tray_icon::{PlatformStyle, TrayKind};
+use tray_status::TrayStatusState;
 use update_check::{UpdateState, UpdateStatus};
 use usb_discovery::search_all_printers;
 
@@ -124,6 +128,7 @@ async fn discover_printers() -> Result<Vec<PrinterInfo>, String> {
 
 #[tauri::command]
 async fn set_default_printer(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     printer: PrinterInfo,
 ) -> Result<AppConfig, String> {
@@ -132,11 +137,13 @@ async fn set_default_printer(
         cfg.upsert_printer(printer, true);
     }
     state.persist().await?;
+    tray_status::schedule_default_printer_check(&app);
     Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn save_printer(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     printer: PrinterInfo,
     make_default: bool,
@@ -146,11 +153,13 @@ async fn save_printer(
         cfg.upsert_printer(printer, make_default);
     }
     state.persist().await?;
+    tray_status::schedule_default_printer_check(&app);
     Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn add_manual_printer(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     name: String,
     address: String,
@@ -179,11 +188,13 @@ async fn add_manual_printer(
         cfg.upsert_printer(printer, make_default);
     }
     state.persist().await?;
+    tray_status::schedule_default_printer_check(&app);
     Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn add_virtual_printer(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     name: String,
     capture_path: Option<String>,
@@ -218,11 +229,13 @@ async fn add_virtual_printer(
         cfg.upsert_printer(printer, make_default);
     }
     state.persist().await?;
+    tray_status::schedule_default_printer_check(&app);
     Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn update_printer(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     original_address: String,
     name: String,
@@ -245,11 +258,13 @@ async fn update_printer(
         )?;
     }
     state.persist().await?;
+    tray_status::schedule_default_printer_check(&app);
     Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn import_printers_and_websites(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     payload: String,
 ) -> Result<AppConfig, String> {
@@ -260,11 +275,14 @@ async fn import_printers_and_websites(
         save_config(&state.app_data_dir, &next)?;
         *cfg = next;
     }
+    tray_status::schedule_default_printer_check(&app);
+    tray_status::schedule_refresh(&app);
     Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn remove_added_printer(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     address: String,
 ) -> Result<AppConfig, String> {
@@ -273,6 +291,7 @@ async fn remove_added_printer(
         cfg.remove_printer(&address);
     }
     state.persist().await?;
+    tray_status::schedule_default_printer_check(&app);
     Ok(state.config.read().await.clone())
 }
 
@@ -351,6 +370,7 @@ async fn get_origin_permissions(
 
 #[tauri::command]
 async fn approve_origin(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     origin: String,
 ) -> Result<OriginPermissions, String> {
@@ -364,11 +384,13 @@ async fn approve_origin(
     }
     dismiss_pending(&state.http_shared(), &key).await;
     state.persist().await?;
+    tray_status::schedule_refresh(&app);
     Ok(permissions_snapshot(&state.http_shared()).await)
 }
 
 #[tauri::command]
 async fn deny_origin(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     origin: String,
 ) -> Result<OriginPermissions, String> {
@@ -382,6 +404,7 @@ async fn deny_origin(
     }
     dismiss_pending(&state.http_shared(), &key).await;
     state.persist().await?;
+    tray_status::schedule_refresh(&app);
     Ok(permissions_snapshot(&state.http_shared()).await)
 }
 
@@ -486,6 +509,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![]),
@@ -543,6 +567,7 @@ pub fn run() {
                             tracing::info!("Print approval needed for origin {origin}");
                             let _ = app_for_pending.emit("origin-pending", &origin);
                             show_settings(&app_for_pending);
+                            tray_status::schedule_refresh(&app_for_pending);
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -587,25 +612,46 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&app_name_i, &sep, &show_i, &help_i, &quit_i])?;
 
             let tray_tooltip = format!("RawLabelPrint {}", env!("CARGO_PKG_VERSION"));
-            // Black + alpha template. macOS tints it. Linux draws the pixmap as-is,
-            // so a dark panel needs the same shape in white.
+            let tray_status = TrayStatusState::new(menu.clone());
             #[cfg(target_os = "linux")]
-            let tray_icon = linux_tray::icon(linux_tray::prefers_dark_ui())?;
-            #[cfg(target_os = "macos")]
-            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
-            // Windows has no template icons; the black template would vanish on a dark
-            // taskbar, so use the full-color app icon.
-            #[cfg(target_os = "windows")]
-            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+            {
+                let on_dark = linux_tray::prefers_dark_ui();
+                tray_status.set_on_dark(on_dark);
+            }
+            let initial_style = {
+                #[cfg(target_os = "macos")]
+                {
+                    PlatformStyle::MacTemplate
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    PlatformStyle::Linux {
+                        on_dark: tray_status.on_dark(),
+                    }
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    PlatformStyle::WindowsColor
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+                {
+                    PlatformStyle::Linux { on_dark: false }
+                }
+            };
+            let tray_icon_image = tray_icon::build(TrayKind::Idle, initial_style)?;
             app.manage(UpdateState::new(menu.clone()));
+            app.manage(tray_status);
             let tray = TrayIconBuilder::with_id(update_check::TRAY_ID)
-                .icon(tray_icon)
+                .icon(tray_icon_image)
                 .menu(&menu)
                 .tooltip(&tray_tooltip)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "app_name" | "settings" => show_settings(app),
                     "getting_started" => open_getting_started(app),
                     update_check::TRAY_ITEM_ID => update_check::activate_tray_item(app),
+                    tray_status::PENDING_ITEM_ID | tray_status::OFFLINE_ITEM_ID => {
+                        show_settings(app)
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -622,11 +668,11 @@ pub fn run() {
             // Template icons are a macOS menu-bar convention; on Linux they often render blank/grey.
             #[cfg(target_os = "macos")]
             let tray = tray.icon_as_template(true);
-            let built = tray.build(app)?;
+            let _built = tray.build(app)?;
             #[cfg(target_os = "linux")]
-            linux_tray::follow_color_scheme(built);
-            #[cfg(not(target_os = "linux"))]
-            let _ = built;
+            linux_tray::follow_color_scheme(app.handle().clone());
+
+            tray_status::spawn_default_printer_poll(app.handle().clone());
 
             // Dev builds report an arbitrary version; manual "Check for updates" still works.
             if !cfg!(debug_assertions) {
