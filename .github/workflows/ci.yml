@@ -37,6 +37,9 @@ jobs:
       - name: Check version sync
         run: npm run version:check
 
+      - name: Check Getting Started HTML
+        run: npm run docs:getting-started:check
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.98.1"
