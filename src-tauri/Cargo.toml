@@ -26,7 +26,8 @@ serialport = "4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3.5.0", default-features = false, features = ["rustls", "json", "gzip"] }
-# `zip` feature only needed for .exe.zip / compressed AppImage; we ship bare NSIS .exe.
+# `zip` feature only needed for compressed updater artifacts (.exe.zip / zipped AppImage);
+# we ship a bare NSIS .exe and a bare AppImage, so it stays off.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-notification = "2.7.0"
 

@@ -1,6 +1,6 @@
 //! Update check against the GitHub Releases API. Every platform gets a notification;
-//! Windows additionally downloads the signed NSIS installer via `tauri-plugin-updater`
-//! and installs it when the user chooses to restart.
+//! Windows (NSIS) and Linux (AppImage) additionally download the signed installer via
+//! `tauri-plugin-updater` and install it when the user chooses to restart.
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,9 +11,26 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-/// Only the NSIS bundle ships signed updater artifacts (see release.yml); `.deb` is not
-/// supported by the updater and macOS is not part of the release pipeline.
-const AUTO_DOWNLOAD: bool = cfg!(target_os = "windows");
+/// Windows (NSIS) always auto-downloads. Linux only does so for AppImage builds — the
+/// release pipeline ships `linux-x86_64-appimage`, and `.deb` cannot install that artifact.
+/// macOS is not part of the release pipeline.
+fn auto_download() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        true
+    }
+    #[cfg(target_os = "linux")]
+    {
+        matches!(
+            tauri::utils::platform::bundle_type(),
+            Some(tauri::utils::config::BundleType::AppImage)
+        )
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        false
+    }
+}
 
 const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/janolss/rawlabelprint/releases/latest";
@@ -159,7 +176,7 @@ pub async fn check_now(app: &AppHandle) -> UpdateStatus {
 
     if status.available {
         notify(app, &state, &status);
-        if AUTO_DOWNLOAD && !status.ready_to_install {
+        if auto_download() && !status.ready_to_install {
             spawn_download(app.clone());
         }
     } else {
@@ -217,7 +234,8 @@ async fn download_update(app: &AppHandle) -> Result<Option<ReadyUpdate>, String>
     Ok(Some(ReadyUpdate { update, bytes }))
 }
 
-/// Runs the NSIS installer in passive mode; the installer terminates this process itself.
+/// Installs the downloaded update through the platform updater (NSIS on Windows, AppImage
+/// on Linux), then restarts so the new version takes over.
 pub fn install_update(app: &AppHandle) -> Result<(), String> {
     let ready = app
         .state::<UpdateState>()
@@ -309,5 +327,16 @@ mod tests {
         assert!(!is_newer("0.4.0", "0.4.0"));
         assert!(!is_newer("0.3.9", "0.4.0"));
         assert!(!is_newer("garbage", "0.4.0"));
+    }
+
+    #[test]
+    fn auto_download_matches_supported_bundles() {
+        #[cfg(target_os = "windows")]
+        assert!(auto_download());
+        // Dev/test and `.deb` binaries are not AppImage-patched, so Linux stays off here.
+        #[cfg(target_os = "linux")]
+        assert!(!auto_download());
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        assert!(!auto_download());
     }
 }

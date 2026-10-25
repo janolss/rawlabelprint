@@ -30,7 +30,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app", "deb", "nsis"],
+    "targets": ["dmg", "app", "deb", "nsis", "appimage"],
     "category": "Utility",
     "shortDescription": "Raw label printing from the browser",
     "longDescription": "Tray application that exposes a localhost HTTP API for sending raw label data directly to Zebra printers on the LAN.",

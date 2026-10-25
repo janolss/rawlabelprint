@@ -53,6 +53,66 @@ jobs:
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
+  linux-appimage:
+    name: Build AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libudev-dev \
+            build-essential
+
+      # Tauri's appimage bundler needs appimagetool. The runner has no FUSE, so it is
+      # extracted from its own AppImage rather than executed.
+      - name: Install appimagetool
+        run: |
+          curl -L https://github.com/AppImage/AppImageKit/releases/download/12.0.8/appimagetool-x86_64.AppImage -o appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          mv squashfs-root/usr/bin/appimagetool /usr/local/bin/appimagetool
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1"
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      # The signed AppImage is both the base install and the updater target, so it is
+      # built with the updater config that emits the .AppImage.sig sidecar.
+      - name: Build signed AppImage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --bundles appimage --config src-tauri/tauri.updater.conf.json
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: RawLabelPrint-linux-appimage
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+          if-no-files-found: error
+
   windows-nsis:
     name: Build Windows installer
     runs-on: windows-latest
@@ -92,13 +152,19 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [linux-deb, windows-nsis]
+    needs: [linux-deb, linux-appimage, windows-nsis]
     runs-on: ubuntu-24.04
     steps:
       - name: Download Linux .deb
         uses: actions/download-artifact@v7
         with:
           name: RawLabelPrint-linux-deb
+          path: dist/
+
+      - name: Download Linux AppImage
+        uses: actions/download-artifact@v7
+        with:
+          name: RawLabelPrint-linux-appimage
           path: dist/
 
       - name: Download Windows installer
@@ -108,6 +174,8 @@ jobs:
           path: dist/
 
       # Manifest for tauri-plugin-updater, served via releases/latest/download/latest.json.
+      # Windows uses the generic arch key; Linux uses the AppImage-specific key so a `.deb`
+      # install does not pick up the AppImage artifact via the `{os}-{arch}` fallback.
       - name: Create updater manifest
         env:
           TAG: ${{ github.ref_name }}
@@ -115,22 +183,37 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          sigs=(dist/*-setup.exe.sig)
-          if [ "${#sigs[@]}" -ne 1 ]; then
-            echo "Expected exactly one NSIS signature, found ${#sigs[@]}" >&2
+
+          nsis_sigs=(dist/*-setup.exe.sig)
+          if [ "${#nsis_sigs[@]}" -ne 1 ]; then
+            echo "Expected exactly one NSIS signature, found ${#nsis_sigs[@]}" >&2
             exit 1
           fi
-          sig_file="${sigs[0]}"
-          exe_name="$(basename "${sig_file%.sig}")"
+          nsig_file="${nsis_sigs[0]}"
+          exe_name="$(basename "${nsig_file%.sig}")"
+
+          appimage_sigs=(dist/*.AppImage.sig)
+          if [ "${#appimage_sigs[@]}" -ne 1 ]; then
+            echo "Expected exactly one AppImage signature, found ${#appimage_sigs[@]}" >&2
+            exit 1
+          fi
+          asig_file="${appimage_sigs[0]}"
+          appimage_name="$(basename "${asig_file%.sig}")"
+
           jq -n \
             --arg version "${TAG#v}" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg signature "$(cat "$sig_file")" \
-            --arg url "https://github.com/${REPO}/releases/download/${TAG}/${exe_name}" \
+            --arg win_signature "$(cat "$nsig_file")" \
+            --arg win_url "https://github.com/${REPO}/releases/download/${TAG}/${exe_name}" \
+            --arg linux_signature "$(cat "$asig_file")" \
+            --arg linux_url "https://github.com/${REPO}/releases/download/${TAG}/${appimage_name}" \
             '{version: $version, pub_date: $pub_date,
-              platforms: {"windows-x86_64": {signature: $signature, url: $url}}}' \
+              platforms: {
+                "windows-x86_64": {signature: $win_signature, url: $win_url},
+                "linux-x86_64-appimage": {signature: $linux_signature, url: $linux_url}
+              }}' \
             > dist/latest.json
-          rm "$sig_file"
+          rm "$nsig_file" "$asig_file"
           cat dist/latest.json
 
       - name: Create GitHub Release
