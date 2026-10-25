@@ -76,7 +76,7 @@ jobs:
       # extracted from its own AppImage rather than executed.
       - name: Install appimagetool
         run: |
-          curl -L https://github.com/AppImage/AppImageKit/releases/download/12.0.8/appimagetool-x86_64.AppImage -o appimagetool-x86_64.AppImage
+          curl -L -f https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -o appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
           ./appimagetool-x86_64.AppImage --appimage-extract
           mv squashfs-root/usr/bin/appimagetool /usr/local/bin/appimagetool
