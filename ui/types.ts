@@ -15,6 +15,8 @@ export interface PrinterInfo {
   capturePath?: string | null;
 }
 
+export type ThemePreference = "system" | "light" | "dark";
+
 export interface AppConfig {
   listenAddress: string;
   port: number;
@@ -24,6 +26,8 @@ export interface AppConfig {
   browserPrintCompatible: boolean;
   debugLogging: boolean;
   allowLocalScripts: boolean;
+  /** Settings window appearance; omit/legacy configs behave as system. */
+  theme?: ThemePreference;
   allowedOrigins?: string[];
   deniedOrigins?: string[];
 }
