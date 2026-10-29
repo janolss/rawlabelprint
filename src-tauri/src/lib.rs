@@ -527,7 +527,16 @@ pub fn run() {
         )
         .init();
 
-    tauri::Builder::default()
+    // Single-instance must be registered first so a second launch never boots HTTP/tray.
+    let mut builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_settings(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
