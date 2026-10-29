@@ -1,4 +1,9 @@
 :root {
+  color-scheme: light dark;
+  font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+}
+
+[data-theme="light"] {
   color-scheme: light;
   --bg: #f2f3f5;
   --panel: #ffffff;
@@ -10,7 +15,50 @@
   --ok: #1f7a3f;
   --bad: #b3261e;
   --warn: #9a6700;
-  font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --surface: #fafafa;
+  --surface-muted: #f0f0f2;
+  --control: #f7f7f9;
+  --control-hover: #ececf0;
+  --hero-glow: #dce8f8;
+  --hero-top: #eef1f5;
+  --focus-mix: white;
+  --nav-hover-bg: color-mix(in srgb, white 55%, transparent);
+  --badge-ok-bg: #e4f5ea;
+  --badge-bad-bg: #fdecea;
+  --badge-warn-bg: #fff4d6;
+  --badge-neutral-bg: #ececf0;
+  --danger-hover-bg: #f9d7d4;
+  --alert-warn-bg: #fff8e8;
+  --shadow: rgb(0 0 0 / 6%);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1c1c1e;
+  --panel: #2c2c2e;
+  --text: #f2f2f7;
+  --muted: #98989f;
+  --line: #3a3a3c;
+  --accent: #5b9fd4;
+  --accent-hover: #7ab0dc;
+  --ok: #5ac87a;
+  --bad: #ff6b63;
+  --warn: #e0a84a;
+  --surface: #242426;
+  --surface-muted: #1a1a1c;
+  --control: #3a3a3c;
+  --control-hover: #48484a;
+  --hero-glow: #1a3050;
+  --hero-top: #222226;
+  --focus-mix: black;
+  --nav-hover-bg: color-mix(in srgb, white 12%, transparent);
+  --badge-ok-bg: #1e3a28;
+  --badge-bad-bg: #3a1e1c;
+  --badge-warn-bg: #3a3018;
+  --badge-neutral-bg: #3a3a3c;
+  --danger-hover-bg: #4a2826;
+  --alert-warn-bg: #3a3018;
+  --shadow: rgb(0 0 0 / 35%);
 }
 
 * {
@@ -20,8 +68,8 @@
 body {
   margin: 0;
   background:
-    radial-gradient(1200px 500px at 10% -10%, #dce8f8 0%, transparent 55%),
-    linear-gradient(180deg, #eef1f5 0%, var(--bg) 40%);
+    radial-gradient(1200px 500px at 10% -10%, var(--hero-glow) 0%, transparent 55%),
+    linear-gradient(180deg, var(--hero-top) 0%, var(--bg) 40%);
   color: var(--text);
   min-height: 100vh;
 }
@@ -68,14 +116,14 @@ body {
 }
 
 .nav-item:hover {
-  background: color-mix(in srgb, white 55%, transparent);
+  background: var(--nav-hover-bg);
   color: var(--text);
 }
 
 .nav-item.active {
   background: var(--panel);
   color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+  box-shadow: 0 1px 2px var(--shadow);
 }
 
 .nav-badge {
@@ -92,12 +140,12 @@ body {
 }
 
 .nav-badge.warn {
-  background: #fff4d6;
+  background: var(--badge-warn-bg);
   color: var(--warn);
 }
 
 .nav-badge.bad {
-  background: #fdecea;
+  background: var(--badge-bad-bg);
   color: var(--bad);
 }
 
@@ -175,17 +223,18 @@ input[type="number"] {
   border-radius: 6px;
   padding: 7px 9px;
   font: inherit;
-  background: #fafafa;
+  background: var(--surface);
+  color: var(--text);
 }
 
 input:focus {
-  outline: 2px solid color-mix(in srgb, var(--accent) 35%, white);
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, var(--focus-mix));
   border-color: var(--accent);
 }
 
 input:read-only {
   color: var(--muted);
-  background: #f0f0f2;
+  background: var(--surface-muted);
   cursor: default;
 }
 
@@ -196,7 +245,7 @@ input:read-only:focus {
 
 button {
   border: 1px solid var(--line);
-  background: #f7f7f9;
+  background: var(--control);
   color: var(--text);
   border-radius: 6px;
   padding: 7px 11px;
@@ -206,7 +255,7 @@ button {
 }
 
 button:hover {
-  background: #ececf0;
+  background: var(--control-hover);
 }
 
 button.primary {
@@ -220,13 +269,13 @@ button.primary:hover {
 }
 
 button.danger {
-  background: #fdecea;
+  background: var(--badge-bad-bg);
   border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
   color: var(--bad);
 }
 
 button.danger:hover {
-  background: #f9d7d4;
+  background: var(--danger-hover-bg);
 }
 
 button:disabled {
@@ -283,7 +332,7 @@ button.linkish:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
-  background: #fafafa;
+  background: var(--surface);
 }
 
 .print-log-meta {
@@ -311,7 +360,7 @@ button.linkish:hover {
   margin: 0;
   padding: 8px;
   border-radius: 6px;
-  background: #f0f0f2;
+  background: var(--surface-muted);
   border: 1px solid var(--line);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
@@ -401,7 +450,7 @@ button.linkish:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
-  background: #fafafa;
+  background: var(--surface);
   font-size: 0.85rem;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -432,7 +481,7 @@ button.linkish:hover {
   padding: 10px 12px;
   font-size: 0.88rem;
   line-height: 1.45;
-  background: #fafafa;
+  background: var(--surface);
 }
 
 .printer-card.muted {
@@ -453,7 +502,7 @@ button.linkish:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
-  background: #fff;
+  background: var(--panel);
 }
 
 .result-card h3 {
@@ -489,22 +538,22 @@ button.linkish:hover {
 }
 
 .badge.ok {
-  background: #e4f5ea;
+  background: var(--badge-ok-bg);
   color: var(--ok);
 }
 
 .badge.bad {
-  background: #fdecea;
+  background: var(--badge-bad-bg);
   color: var(--bad);
 }
 
 .badge.warn {
-  background: #fff4d6;
+  background: var(--badge-warn-bg);
   color: var(--warn);
 }
 
 .badge.neutral {
-  background: #ececf0;
+  background: var(--badge-neutral-bg);
   color: var(--muted);
 }
 
@@ -518,7 +567,7 @@ button.linkish:hover {
 }
 
 .badge.status-badge:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 40%, white);
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, var(--focus-mix));
   outline-offset: 1px;
 }
 
@@ -540,7 +589,7 @@ button.linkish:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
-  background: #fafafa;
+  background: var(--surface);
 }
 
 .saved-header {
@@ -591,7 +640,7 @@ button.linkish:hover {
 
 .overview-alert {
   border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
-  background: #fff8e8;
+  background: var(--alert-warn-bg);
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 12px;
@@ -599,7 +648,7 @@ button.linkish:hover {
 
 .overview-alert.bad {
   border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
-  background: #fdecea;
+  background: var(--badge-bad-bg);
 }
 
 .overview-alert p {
@@ -620,7 +669,7 @@ button.linkish:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
-  background: #fafafa;
+  background: var(--surface);
   font-size: 0.85rem;
 }
 

@@ -21,6 +21,7 @@ import type {
   PrinterInfo,
   PrinterStatus,
   PrintLogEntry,
+  ThemePreference,
   UiPrinterStatus,
   UpdateStatus,
 } from "./types.ts";
@@ -56,6 +57,9 @@ const els = {
   virtualMakeDefault: requireEl<HTMLInputElement>("virtualMakeDefault"),
   addVirtualBtn: requireEl<HTMLButtonElement>("addVirtualBtn"),
   launchAtLogin: requireEl<HTMLInputElement>("launchAtLogin"),
+  themeSystem: requireEl<HTMLInputElement>("themeSystem"),
+  themeLight: requireEl<HTMLInputElement>("themeLight"),
+  themeDark: requireEl<HTMLInputElement>("themeDark"),
   apiUrl: requireEl<HTMLElement>("apiUrl"),
   printLogList: requireEl<HTMLElement>("printLogList"),
   refreshPrintLogBtn: requireEl<HTMLButtonElement>("refreshPrintLogBtn"),
@@ -84,8 +88,51 @@ const statusCheckedAt = new Map<string, number>();
 const editingAddresses = new Set<string>();
 let statusRefreshSeq = 0;
 let savedPortValue = "9100";
+let themePreference: ThemePreference = "system";
+let systemThemeMql: MediaQueryList | null = null;
 const STATUS_DEBOUNCE_MS = 30_000;
 const STATUS_CHECK_CONCURRENCY = 4;
+
+function normalizeTheme(value: unknown): ThemePreference {
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+
+function resolveTheme(preference: ThemePreference): "light" | "dark" {
+  if (preference === "light" || preference === "dark") return preference;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function onSystemThemeChange(): void {
+  if (themePreference === "system") {
+    document.documentElement.dataset.theme = resolveTheme("system");
+  }
+}
+
+/** Apply Settings appearance; listens to OS changes only while preference is system. */
+function applyTheme(preference: ThemePreference): void {
+  themePreference = preference;
+  document.documentElement.dataset.theme = resolveTheme(preference);
+
+  if (!systemThemeMql) {
+    systemThemeMql = matchMedia("(prefers-color-scheme: dark)");
+  }
+  systemThemeMql.removeEventListener("change", onSystemThemeChange);
+  if (preference === "system") {
+    systemThemeMql.addEventListener("change", onSystemThemeChange);
+  }
+}
+
+function selectedTheme(): ThemePreference {
+  if (els.themeLight.checked) return "light";
+  if (els.themeDark.checked) return "dark";
+  return "system";
+}
+
+function setThemeRadios(preference: ThemePreference): void {
+  els.themeSystem.checked = preference === "system";
+  els.themeLight.checked = preference === "light";
+  els.themeDark.checked = preference === "dark";
+}
 
 function defaultAddress(): string | null {
   return currentConfig?.defaultPrinter?.address ?? null;
@@ -439,6 +486,9 @@ function applyConfig(config: AppConfig): void {
   els.browserPrintCompatible.checked = config.browserPrintCompatible !== false;
   els.debugLogging.checked = !!config.debugLogging;
   els.allowLocalScripts.checked = !!config.allowLocalScripts;
+  const theme = normalizeTheme(config.theme);
+  setThemeRadios(theme);
+  applyTheme(theme);
   renderSaved(config.addedPrinters || []);
   syncMakeDefaultCheckboxes();
   updateApiUrl();
@@ -453,6 +503,7 @@ async function persistSettings(): Promise<AppConfig> {
     browserPrintCompatible: els.browserPrintCompatible.checked,
     debugLogging: els.debugLogging.checked,
     allowLocalScripts: els.allowLocalScripts.checked,
+    theme: selectedTheme(),
   });
 }
 
@@ -673,6 +724,22 @@ els.launchAtLogin.addEventListener("change", async () => {
     alert(`Could not update startup preference: ${e}`);
   }
 });
+
+for (const radio of [els.themeSystem, els.themeLight, els.themeDark]) {
+  radio.addEventListener("change", async () => {
+    if (!radio.checked) return;
+    const next = selectedTheme();
+    applyTheme(next);
+    try {
+      currentConfig = await persistSettings();
+      applyConfig(currentConfig);
+    } catch (e) {
+      console.error(e);
+      if (currentConfig) applyConfig(currentConfig);
+      alert(`Could not update appearance: ${e}`);
+    }
+  });
+}
 
 els.browserPrintCompatible.addEventListener("change", async () => {
   try {

@@ -156,6 +156,16 @@ impl PrinterInfo {
     }
 }
 
+/// Settings window appearance preference (webview + native titlebar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
@@ -180,6 +190,9 @@ pub struct AppConfig {
     /// metadata (curl/scripts) may use the API. When false, only approved browser Origins.
     #[serde(default = "default_allow_local_scripts")]
     pub allow_local_scripts: bool,
+    /// Settings UI theme: follow OS, or force light/dark.
+    #[serde(default = "default_theme")]
+    pub theme: ThemePreference,
     /// Browser Origins allowed to print via the local HTTP API (soft allowlist).
     #[serde(default)]
     pub allowed_origins: Vec<String>,
@@ -213,6 +226,10 @@ fn default_allow_local_scripts() -> bool {
     false
 }
 
+fn default_theme() -> ThemePreference {
+    ThemePreference::System
+}
+
 pub fn parse_ip_address(address: &str) -> Result<String, String> {
     let address = address.trim();
     if address.parse::<IpAddr>().is_err() {
@@ -240,6 +257,7 @@ impl Default for AppConfig {
             browser_print_compatible: default_browser_print_compatible(),
             debug_logging: default_debug_logging(),
             allow_local_scripts: default_allow_local_scripts(),
+            theme: default_theme(),
             allowed_origins: Vec::new(),
             denied_origins: Vec::new(),
         }
@@ -895,6 +913,7 @@ mod tests {
         assert_eq!(loaded.port, 9100);
         assert!(loaded.browser_print_compatible);
         assert!(!loaded.allow_local_scripts);
+        assert_eq!(loaded.theme, ThemePreference::System);
         assert!(loaded.added_printers.is_empty());
         assert!(loaded.default_printer.is_none());
     }
@@ -1011,6 +1030,15 @@ mod tests {
         assert_eq!(loaded.added_printers[0].connection, Connection::Network);
         assert_eq!(loaded.added_printers[0].address, "10.0.0.1");
         assert!(config_path(&path).is_file());
+    }
+
+    #[test]
+    fn load_config_missing_theme_defaults_to_system() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        fs::write(config_path(&path), r#"{"port":9100}"#).unwrap();
+        let loaded = load_config(&path).unwrap();
+        assert_eq!(loaded.theme, ThemePreference::System);
     }
 
     #[test]

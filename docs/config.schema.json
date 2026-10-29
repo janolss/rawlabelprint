@@ -16,6 +16,7 @@
     "browserPrintCompatible": { "type": "boolean" },
     "debugLogging": { "type": "boolean" },
     "allowLocalScripts": { "type": "boolean" },
+    "theme": { "enum": ["system", "light", "dark"] },
     "allowedOrigins": {
       "type": "array",
       "items": { "type": "string" }
@@ -80,6 +81,7 @@
       "browserPrintCompatible": true,
       "debugLogging": false,
       "allowLocalScripts": false,
+      "theme": "system",
       "allowedOrigins": ["http://127.0.0.1:8080"],
       "deniedOrigins": []
     }

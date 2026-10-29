@@ -15,7 +15,7 @@ mod usb_discovery;
 
 use config::{
     import_printer_site, load_config, parse_ip_address, require_listen_port,
-    sanitize_listen_address, save_config, AppConfig, Connection, PrinterInfo,
+    sanitize_listen_address, save_config, AppConfig, Connection, PrinterInfo, ThemePreference,
 };
 use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
 use print::{get_printer_status, PrinterStatus};
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::path::BaseDirectory;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Theme, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_opener::OpenerExt;
 use tray_icon::{PlatformStyle, TrayKind};
@@ -62,6 +62,7 @@ async fn save_settings(
     browser_print_compatible: bool,
     debug_logging: bool,
     allow_local_scripts: bool,
+    theme: ThemePreference,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
     let port = require_listen_port(port)?;
@@ -71,6 +72,7 @@ async fn save_settings(
     let mut cfg = state.config.write().await;
     let previous = cfg.clone();
     let restart_needed = previous.listen_address != listen_address || previous.port != port;
+    let theme_changed = theme != previous.theme;
     let autostart_changed = launch_at_login != previous.launch_at_login
         && (!launch_at_login || autostart_registration_allowed());
 
@@ -92,6 +94,7 @@ async fn save_settings(
     updated.browser_print_compatible = browser_print_compatible;
     updated.debug_logging = debug_logging;
     updated.allow_local_scripts = allow_local_scripts;
+    updated.theme = theme;
     if let Err(err) = save_config(&state.app_data_dir, &updated) {
         let rollback_result = if autostart_changed {
             if previous.launch_at_login {
@@ -111,6 +114,9 @@ async fn save_settings(
     }
     *cfg = updated;
     drop(cfg);
+    if theme_changed {
+        apply_settings_window_theme(&app, theme);
+    }
     if restart_needed {
         state.restart_http().await?;
     }
@@ -461,6 +467,21 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
+/// Sync native titlebar/chrome with the Settings theme preference.
+fn apply_settings_window_theme(app: &AppHandle, preference: ThemePreference) {
+    let Some(window) = app.get_webview_window("settings") else {
+        return;
+    };
+    let theme = match preference {
+        ThemePreference::System => None,
+        ThemePreference::Light => Some(Theme::Light),
+        ThemePreference::Dark => Some(Theme::Dark),
+    };
+    if let Err(err) = window.set_theme(theme) {
+        tracing::warn!("Failed to set settings window theme: {err}");
+    }
+}
+
 /// Bundled resource in release; repo file next to `src-tauri` in `tauri dev`.
 fn getting_started_path(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(bundled) = app
@@ -689,6 +710,8 @@ pub fn run() {
                     }
                 });
             }
+
+            apply_settings_window_theme(app.handle(), config.theme);
 
             Ok(())
         })
