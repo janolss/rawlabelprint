@@ -77,7 +77,7 @@
           "connection": "network"
         }
       ],
-      "launchAtLogin": false,
+      "launchAtLogin": true,
       "browserPrintCompatible": true,
       "debugLogging": false,
       "allowLocalScripts": false,

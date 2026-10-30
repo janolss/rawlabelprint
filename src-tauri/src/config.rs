@@ -177,7 +177,7 @@ pub struct AppConfig {
     pub default_printer: Option<PrinterInfo>,
     #[serde(default)]
     pub added_printers: Vec<PrinterInfo>,
-    #[serde(default)]
+    #[serde(default = "default_launch_at_login")]
     pub launch_at_login: bool,
     /// When true, expose Zebra Browser Print HTTP routes (/available, /default, /write, /read, /config)
     /// so BrowserPrint.js clients work as a drop-in replacement.
@@ -212,6 +212,12 @@ pub fn sanitize_listen_address(_requested: &str) -> String {
 
 fn default_http_port() -> u16 {
     9100
+}
+
+/// Release builds autostart by default; debug/dev leave it off (LaunchAgent must not
+/// point at `target/debug`).
+fn default_launch_at_login() -> bool {
+    !cfg!(debug_assertions)
 }
 
 fn default_browser_print_compatible() -> bool {
@@ -253,7 +259,7 @@ impl Default for AppConfig {
             port: default_http_port(),
             default_printer: None,
             added_printers: Vec::new(),
-            launch_at_login: false,
+            launch_at_login: default_launch_at_login(),
             browser_print_compatible: default_browser_print_compatible(),
             debug_logging: default_debug_logging(),
             allow_local_scripts: default_allow_local_scripts(),
