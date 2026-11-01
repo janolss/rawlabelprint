@@ -1,6 +1,6 @@
 [package]
 name = "rawlabelprint"
-version = "0.5.6"
+version = "0.5.7"
 description = "Raw label printing tray app for macOS, Linux and Windows (Zebra LAN/USB printers)"
 authors = ["Jan Olsson"]
 license = "MIT"
@@ -29,13 +29,13 @@ ureq = { version = "3.5.0", default-features = false, features = ["rustls", "jso
 # `zip` feature only needed for compressed updater artifacts (.exe.zip / zipped AppImage);
 # we ship a bare NSIS .exe and a bare AppImage, so it stays off.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
-tauri-plugin-notification = "2.7.0"
+tauri-plugin-notification = "2.8.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = "6"
+zbus = "6.2.1"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.5.5"

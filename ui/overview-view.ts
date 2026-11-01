@@ -112,11 +112,6 @@ export function buildOverviewHtml(model: OverviewModel): string {
     ? `${escapeHtml(lastLog.printerName || lastLog.printerAddress)} · ${escapeHtml(formatLogTime(lastLog.timestampMs))}`
     : "—";
 
-  const sitesAction =
-    perms.pending.length > 0
-      ? `<button type="button" data-overview-action="goto-sites">Review</button>`
-      : "";
-
   return `
     <section class="block">
       <h2>Overview</h2>
@@ -135,7 +130,7 @@ export function buildOverviewHtml(model: OverviewModel): string {
         <div class="overview-row">
           <span class="label">Websites</span>
           <span class="value">${escapeHtml(sitesParts.join(" · "))}</span>
-          ${sitesAction || "<span></span>"}
+          <button type="button" class="linkish" data-overview-action="goto-sites">Open</button>
         </div>
         <div class="overview-row">
           <span class="label">Last print</span>

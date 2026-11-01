@@ -10,6 +10,8 @@
         .matches
         ? "dark"
         : "light";
+      // Suppress the WebView default right-click menu (Reload / Inspect, etc.).
+      document.addEventListener("contextmenu", (e) => e.preventDefault());
     </script>
     <link rel="stylesheet" href="./styles.css" />
   </head>

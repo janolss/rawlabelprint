@@ -179,7 +179,7 @@ test("buildOverviewHtml warns when default is offline", () => {
   assert.match(html, /data-overview-action="recheck-default"/);
   assert.match(html, /data-overview-action="goto-printers"/);
   assert.match(html, /1 pending/);
-  assert.match(html, /data-overview-action="goto-sites"/);
+  assert.match(html, /data-overview-action="goto-sites"[^>]*>Open</);
 });
 
 test("buildOverviewHtml warns when no default", () => {
