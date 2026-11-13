@@ -47,6 +47,12 @@ export interface PrinterStatus {
   detail?: string | null;
 }
 
+export interface PrinterInfoRow {
+  key: string;
+  label: string;
+  value: string;
+}
+
 export interface PrintLogEntry {
   id: number;
   timestampMs: number;

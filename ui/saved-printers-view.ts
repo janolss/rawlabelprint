@@ -1,8 +1,13 @@
 /** Pure HTML builders for the Saved printers section. */
 
 import { escapeHtml } from "./print-log-view.ts";
-import { displayName, isUsbPrinter, isVirtualPrinter } from "./printer-utils.ts";
-import type { PrinterInfo, UiPrinterStatus } from "./types.ts";
+import {
+  displayName,
+  friendlyModelLabel,
+  isUsbPrinter,
+  isVirtualPrinter,
+} from "./printer-utils.ts";
+import type { PrinterInfo, PrinterInfoRow, UiPrinterStatus } from "./types.ts";
 
 export function statusBadgeHtml(
   address: string,
@@ -79,10 +84,13 @@ export function buildSavedPrintersHtml(
       const virtual = isVirtualPrinter(p);
       const kind = virtual ? "Virtual" : usb ? "USB" : "Network";
       const editing = editingAddresses.has(p.address);
+      const modelLabel = friendlyModelLabel(p.model || "");
+      const shownName = displayName(p);
       const showModel =
-        !!p.model &&
-        p.model !== "Manual" &&
-        p.model.trim() !== (p.name?.trim() || "");
+        !!modelLabel &&
+        modelLabel !== "Manual" &&
+        modelLabel !== shownName &&
+        modelLabel !== (p.name?.trim() || "");
       const portRow =
         usb || virtual
           ? ""
@@ -103,24 +111,30 @@ export function buildSavedPrintersHtml(
       <div class="saved-card" data-address="${escapeHtml(p.address)}" data-connection="${escapeHtml(p.connection || "network")}">
         <div class="saved-header">
           <div class="saved-title">
-            <strong>${escapeHtml(displayName(p))}</strong>
+            <strong>${escapeHtml(shownName)}</strong>
             <span class="saved-meta"> · ${locationLabel(p)}</span>
           </div>
           ${isDefault ? `<span class="badge ok">Default</span>` : ""}
           <span class="badge neutral">${kind}</span>
           ${statusBadgeHtml(p.address, statuses)}
-          ${showModel ? `<span class="badge neutral">${escapeHtml(p.model)}</span>` : ""}
+          ${showModel ? `<span class="badge neutral">${escapeHtml(modelLabel)}</span>` : ""}
           <div class="saved-actions">
             <button type="button" data-action="recheck" title="Recheck status">↻</button>
+            ${
+              virtual
+                ? ""
+                : `<button type="button" data-action="info" title="Printer info">Info</button>`
+            }
             <button type="button" data-action="test">Test print</button>
             <button type="button" data-action="edit">${editing ? "Done" : "Edit"}</button>
           </div>
         </div>
         <div class="saved-test-status" data-test-status></div>
+        <div class="saved-info hidden" data-info-panel></div>
         <div class="saved-edit${editing ? "" : " hidden"}">
           <div class="row">
             <label>Name</label>
-            <input type="text" data-field="name" value="${escapeHtml(nameValue)}" placeholder="${escapeHtml(p.model || p.address)}" />
+            <input type="text" data-field="name" value="${escapeHtml(nameValue)}" placeholder="${escapeHtml(modelLabel || p.address)}" />
           </div>
           ${locationRow}
           ${portRow}
@@ -133,4 +147,17 @@ export function buildSavedPrintersHtml(
       </div>`;
     })
     .join("");
+}
+
+export function buildPrinterInfoHtml(rows: PrinterInfoRow[]): string {
+  if (!rows.length) {
+    return `<p class="muted">No info returned</p>`;
+  }
+  const body = rows
+    .map(
+      (row) =>
+        `<div class="printer-info-row"><dt>${escapeHtml(row.label)}</dt><dd>${escapeHtml(row.value)}</dd></div>`
+    )
+    .join("");
+  return `<dl class="printer-info">${body}</dl>`;
 }

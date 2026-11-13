@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildOverviewHtml } from "./overview-view.ts";
 import { displayName } from "./printer-utils.ts";
-import { buildSavedPrintersHtml, statusBadgeHtml } from "./saved-printers-view.ts";
+import {
+  buildPrinterInfoHtml,
+  buildSavedPrintersHtml,
+  statusBadgeHtml,
+} from "./saved-printers-view.ts";
 import {
   buildNoPrintersHtml,
   buildSearchErrorHtml,
@@ -32,7 +36,16 @@ const other: PrinterInfo = {
 
 test("displayName prefers explicit name", () => {
   assert.equal(displayName(sample), "Shipping");
-  assert.equal(displayName({ ...sample, name: null }), "ZD421 (10.0.0.5)");
+  assert.equal(displayName({ ...sample, name: null }), "ZD421");
+  assert.equal(
+    displayName({
+      ...sample,
+      name: null,
+      model: "ZTC ZD421-203dpi ZPL112923",
+      address: "192.168.2.120",
+    }),
+    "Zebra ZD421"
+  );
 });
 
 test("buildSavedPrintersHtml empty state", () => {
@@ -49,10 +62,41 @@ test("buildSavedPrintersHtml includes default and status badges", () => {
   assert.match(html, /Default/);
   assert.match(html, />Online</);
   assert.match(html, /data-action="recheck"/);
+  assert.match(html, /data-action="info"/);
   assert.match(html, /data-action="test"/);
   assert.match(html, /data-action="edit"/);
   assert.match(html, /data-action="save"/);
   assert.doesNotMatch(html, /Set as default/);
+});
+
+test("buildPrinterInfoHtml renders friendly labels", () => {
+  const html = buildPrinterInfoHtml([
+    { key: "device.product_name", label: "Device product name", value: "ZD421" },
+    { key: "ezpl.print_method", label: "Print method", value: "thermal trans" },
+  ]);
+  assert.match(html, /Device product name/);
+  assert.match(html, /ZD421/);
+  assert.match(html, /Print method/);
+  assert.match(html, /thermal trans/);
+});
+
+test("buildSavedPrintersHtml omits Info for virtual printers", () => {
+  const html = buildSavedPrintersHtml(
+    [
+      {
+        ...sample,
+        name: "Preview",
+        model: "",
+        address: "Preview",
+        connection: "virtual",
+        printPort: 0,
+        configPort: 0,
+      },
+    ],
+    null,
+    new Map()
+  );
+  assert.doesNotMatch(html, /data-action="info"/);
 });
 
 test("buildSavedPrintersHtml sorts default first", () => {
@@ -141,6 +185,17 @@ test("search results builders", () => {
   assert.match(usbHtml, />USB</);
   assert.doesNotMatch(usbHtml, /data-config-url/);
   assert.match(usbHtml, /\/dev\/ttyACM0/);
+
+  const longModel = buildSearchResultsHtml([
+    {
+      ...sample,
+      name: null,
+      model: "ZTC ZD421-203dpi ZPL112923",
+      address: "192.168.2.120",
+    },
+  ]);
+  assert.match(longModel, /<h3>Zebra ZD421<\/h3>/);
+  assert.doesNotMatch(longModel, /ZTC ZD421-203dpi ZPL112923/);
 });
 
 test("connectionStatusBadgeHtml online and offline", () => {

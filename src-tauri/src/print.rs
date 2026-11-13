@@ -400,6 +400,99 @@ fn connect_printer(printer: &PrinterInfo) -> Result<PrinterStream, String> {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrinterInfoRow {
+    pub key: String,
+    pub label: String,
+    pub value: String,
+}
+
+const SGD_INFO_KEYS: &[&str] = &[
+    "device.product_name",
+    "device.friendly_name",
+    "device.unique_id",
+    "device.company_name",
+    "device.languages",
+    "appl.name",
+    "appl.version",
+    "ezpl.print_method",
+    "ezpl.print_width",
+    "ezpl.print_mode",
+    "ezpl.media_type",
+    "media.printmode",
+    "media.type",
+    "media.sense_mode",
+    "print.tone",
+    "head.resolution.in_dpi",
+    "ip.addr",
+    "ip.netmask",
+    "ip.gateway",
+    "wlan.ip.addr",
+    "odometer.total_print_length",
+    "odometer.user_label_count",
+    "zpl.label_length",
+];
+
+/// Humanize SGD keys: `device.product_name` → `Device product name`,
+/// `ezpl.print_method` → `Print method` (drop opaque ezpl/zpl prefix).
+pub fn sgd_label(key: &str) -> String {
+    let parts: Vec<&str> = key.split('.').filter(|p| !p.is_empty()).collect();
+    let start = match parts.first() {
+        Some(&"ezpl" | &"zpl") if parts.len() > 1 => 1,
+        _ => 0,
+    };
+    let text = parts[start..]
+        .join(" ")
+        .replace('_', " ")
+        .to_ascii_lowercase();
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn clean_sgd_value(raw: &[u8]) -> String {
+    let text = String::from_utf8_lossy(raw);
+    let trimmed = text
+        .trim_matches(|c: char| c == '\u{02}' || c == '\u{03}' || c.is_whitespace())
+        .trim_matches('"')
+        .trim();
+    trimmed.to_string()
+}
+
+/// Query a fixed set of SGD keys over RAW TCP/USB for the settings Info panel.
+pub fn get_printer_sgd_info(printer: &PrinterInfo) -> Result<Vec<PrinterInfoRow>, String> {
+    if printer.connection == Connection::Virtual {
+        return Err("Virtual printers have no SGD info".into());
+    }
+    let mut stream = connect_printer(printer)?;
+    stream.set_read_timeout(Some(READ_TIMEOUT))?;
+    stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    drain_pending(&mut stream);
+
+    let mut rows = Vec::with_capacity(SGD_INFO_KEYS.len());
+    for key in SGD_INFO_KEYS {
+        let cmd = format!("! U1 getvar \"{key}\"\r\n");
+        write_payload(&mut stream, cmd.as_bytes())?;
+        let raw = read_query_reply(&mut stream, 0);
+        let value = clean_sgd_value(&raw);
+        if value.is_empty() || value == "?" {
+            continue;
+        }
+        rows.push(PrinterInfoRow {
+            key: (*key).to_string(),
+            label: sgd_label(key),
+            value,
+        });
+    }
+    if rows.is_empty() {
+        return Err("Printer returned no SGD values".into());
+    }
+    Ok(rows)
+}
+
 pub fn send_raw_to_printer(printer: &PrinterInfo, data: &str) -> Result<(), String> {
     send_raw_bytes_to_printer(printer, data.as_bytes())
 }
@@ -1084,6 +1177,17 @@ mod tests {
             "reply: {reply:?}"
         );
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn sgd_label_humanizes_keys() {
+        assert_eq!(sgd_label("device.product_name"), "Device product name");
+        assert_eq!(sgd_label("ezpl.print_method"), "Print method");
+        assert_eq!(
+            sgd_label("head.resolution.in_dpi"),
+            "Head resolution in dpi"
+        );
+        assert_eq!(sgd_label("media.type"), "Media type");
     }
 
     #[test]
