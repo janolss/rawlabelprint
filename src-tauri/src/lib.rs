@@ -18,7 +18,7 @@ use config::{
     sanitize_listen_address, save_config, AppConfig, Connection, PrinterInfo, ThemePreference,
 };
 use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
-use print::{get_printer_status, PrinterStatus};
+use print::{get_printer_sgd_info, get_printer_status, PrinterInfoRow, PrinterStatus};
 use print_log::PrintLogSummary;
 use state::AppState;
 use std::path::{Path, PathBuf};
@@ -317,6 +317,24 @@ async fn check_printer_status(
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_printer_info(
+    state: tauri::State<'_, Arc<AppState>>,
+    printer: PrinterInfo,
+) -> Result<Vec<PrinterInfoRow>, String> {
+    let permit = state
+        .device_io
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| "Printer info request limit reached; retry shortly".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        get_printer_sgd_info(&printer)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -737,6 +755,7 @@ pub fn run() {
             update_printer,
             remove_added_printer,
             check_printer_status,
+            get_printer_info,
             test_print,
             get_print_log,
             clear_print_log,

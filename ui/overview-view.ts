@@ -1,6 +1,7 @@
 /** Pure HTML builder for the Overview pane. */
 
 import { escapeHtml } from "./print-log-view.ts";
+import { formatPrinterName } from "./print-log-view.ts";
 import { displayName, isUsbPrinter, isVirtualPrinter } from "./printer-utils.ts";
 import type {
   OriginPermissions,
@@ -109,7 +110,7 @@ export function buildOverviewHtml(model: OverviewModel): string {
   ].filter(Boolean);
 
   const lastLogValue = lastLog
-    ? `${escapeHtml(lastLog.printerName || lastLog.printerAddress)} · ${escapeHtml(formatLogTime(lastLog.timestampMs))}`
+    ? `${escapeHtml(formatPrinterName(lastLog.printerName) || lastLog.printerAddress)} · ${escapeHtml(formatLogTime(lastLog.timestampMs))}`
     : "—";
 
   return `

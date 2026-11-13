@@ -1,7 +1,7 @@
 /** Pure HTML builders for LAN/USB search results. */
 
 import { escapeHtml } from "./print-log-view.ts";
-import { isUsbPrinter } from "./printer-utils.ts";
+import { displayName, isUsbPrinter } from "./printer-utils.ts";
 import type { PrinterInfo, PrinterStatus } from "./types.ts";
 
 export function buildSearchingHtml(): string {
@@ -24,7 +24,7 @@ export function buildSearchResultsHtml(
   return printers
     .map((p, idx) => {
       const usb = isUsbPrinter(p);
-      const title = escapeHtml(p.model || p.address);
+      const title = escapeHtml(displayName(p));
       const alreadySaved = savedAddresses.has(p.address);
       const heading = `<h3>${title}</h3>`;
       const configLink = usb

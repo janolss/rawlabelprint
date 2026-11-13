@@ -41,7 +41,7 @@ afterEach(() => {
 const sampleDevice = {
   deviceType: "printer",
   uid: "net:10.0.0.5:9100",
-  name: "ZD421 (10.0.0.5)",
+  name: "ZD421",
   connection: "network",
   version: 2,
   provider: "com.zebra.ds.webdriver.desktop.provider.DefaultDeviceProvider",

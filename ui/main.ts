@@ -6,6 +6,7 @@ import { buildOverviewHtml } from "./overview-view.ts";
 import { buildPrintLogHtml, escapeHtml } from "./print-log-view.ts";
 import {
   applyStatusBadgeDom,
+  buildPrinterInfoHtml,
   buildSavedPrintersHtml,
 } from "./saved-printers-view.ts";
 import {
@@ -19,6 +20,7 @@ import type {
   AppConfig,
   OriginPermissions,
   PrinterInfo,
+  PrinterInfoRow,
   PrinterStatus,
   PrintLogEntry,
   ThemePreference,
@@ -367,6 +369,26 @@ function renderSaved(list: PrinterInfo[] | null | undefined): void {
       .querySelector<HTMLButtonElement>('[data-action="recheck"]')
       ?.addEventListener("click", () => {
         if (originalAddress) void refreshPrinterStatus(originalAddress);
+      });
+
+    card
+      .querySelector<HTMLButtonElement>('[data-action="info"]')
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget as HTMLButtonElement;
+        const printer = findSavedPrinter(originalAddress);
+        const panel = card.querySelector<HTMLElement>("[data-info-panel]");
+        if (!printer || !panel) return;
+        btn.disabled = true;
+        panel.classList.remove("hidden");
+        panel.innerHTML = `<span class="badge neutral">Loading info…</span>`;
+        try {
+          const rows = await invoke<PrinterInfoRow[]>("get_printer_info", { printer });
+          panel.innerHTML = buildPrinterInfoHtml(rows);
+        } catch (err) {
+          panel.innerHTML = `<span class="badge bad">${escapeHtml(String(err))}</span>`;
+        } finally {
+          btn.disabled = false;
+        }
       });
 
     card

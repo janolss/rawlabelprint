@@ -1,7 +1,7 @@
 {
   "name": "rawlabelprint",
   "private": true,
-  "version": "0.5.7",
+  "version": "0.5.8",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "marked": "^18.1.0",
+    "marked": "^18.2.0",
     "tsx": "^4.23.4",
     "typescript": "^7.0.2",
     "vite": "^8"
@@ -34,5 +34,9 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2",
     "@tauri-apps/plugin-opener": "^2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
   }
 }

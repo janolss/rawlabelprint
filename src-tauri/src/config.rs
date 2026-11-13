@@ -99,10 +99,11 @@ impl PrinterInfo {
                 return name.clone();
             }
         }
-        if self.model.trim().is_empty() {
+        let label = friendly_model_label(&self.model);
+        if label.is_empty() {
             self.address.clone()
         } else {
-            format!("{} ({})", self.model, self.address)
+            label
         }
     }
 
@@ -154,6 +155,28 @@ impl PrinterInfo {
             "manufacturer": "Zebra Technologies"
         })
     }
+}
+
+/// Shorten discovery model strings for default display names.
+/// e.g. "ZTC ZD421-203dpi ZPL112923" → "Zebra ZD421".
+fn friendly_model_label(model: &str) -> String {
+    let mut parts = Vec::new();
+    for token in model.split_whitespace() {
+        if token.len() >= 3 && token[..3].eq_ignore_ascii_case("ZPL") {
+            continue;
+        }
+        let part = if token.eq_ignore_ascii_case("ZTC") {
+            "Zebra".to_string()
+        } else if let Some((base, _)) = token.split_once('-') {
+            base.to_string()
+        } else {
+            token.to_string()
+        };
+        if !part.is_empty() {
+            parts.push(part);
+        }
+    }
+    parts.join(" ")
 }
 
 /// Settings window appearance preference (webview + native titlebar).
@@ -733,9 +756,9 @@ mod tests {
     }
 
     #[test]
-    fn display_name_falls_back_to_model_and_address() {
+    fn display_name_falls_back_to_friendly_model_or_address() {
         let with_model = sample_printer("10.0.0.5", "");
-        assert_eq!(with_model.display_name(), "ZD421 (10.0.0.5)");
+        assert_eq!(with_model.display_name(), "ZD421");
 
         let address_only = PrinterInfo {
             model: String::new(),
@@ -745,10 +768,31 @@ mod tests {
     }
 
     #[test]
+    fn friendly_model_label_shortens_discovery_string() {
+        assert_eq!(
+            friendly_model_label("ZTC ZD421-203dpi ZPL112923"),
+            "Zebra ZD421"
+        );
+        assert_eq!(friendly_model_label("ZD421"), "ZD421");
+        assert_eq!(friendly_model_label("Manual"), "Manual");
+        assert_eq!(friendly_model_label(""), "");
+    }
+
+    #[test]
+    fn display_name_uses_friendly_model_label() {
+        let p = PrinterInfo {
+            model: "ZTC ZD421-203dpi ZPL112923".into(),
+            name: None,
+            ..sample_printer("192.168.2.120", "D6J231909982")
+        };
+        assert_eq!(p.display_name(), "Zebra ZD421");
+    }
+
+    #[test]
     fn matches_name_covers_uid_and_rejects_empty() {
         let p = sample_printer("10.0.0.5", "ABC123");
         assert!(p.matches_name("ABC123"));
-        assert!(p.matches_name("ZD421 (10.0.0.5)"));
+        assert!(p.matches_name("ZD421"));
         assert!(!p.matches_name(""));
         assert!(!p.matches_name("   "));
         assert!(!p.matches_name("unknown"));
@@ -780,7 +824,7 @@ mod tests {
         let device = p.to_browser_print_device();
         assert_eq!(device["deviceType"], "printer");
         assert_eq!(device["uid"], "SN1");
-        assert_eq!(device["name"], "ZD421 (10.0.0.5)");
+        assert_eq!(device["name"], "ZD421");
         assert_eq!(device["connection"], "network");
         assert_eq!(device["version"], 2);
         assert_eq!(device["manufacturer"], "Zebra Technologies");
