@@ -262,7 +262,7 @@ impl DeviceSessionPool {
 
         let mut map = self.inner.lock().map_err(|e| e.to_string())?;
         Self::insert_session(&mut map, &key, session.stream, None);
-        Ok(String::from_utf8_lossy(&buf).into_owned())
+        Ok(String::from_utf8_lossy_owned(buf))
     }
 }
 

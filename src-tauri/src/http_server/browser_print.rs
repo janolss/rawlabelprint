@@ -297,7 +297,7 @@ async fn handle_convert_inner(
 
     if looks_raw {
         // Return as converted payload so client can send it.
-        let zpl = String::from_utf8_lossy(&blob).into_owned();
+        let zpl = String::from_utf8_lossy_owned(blob);
         return Ok(json_ok(json!({ "zpl": zpl, "data": zpl }).to_string()));
     }
 

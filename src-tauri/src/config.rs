@@ -2,6 +2,7 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{ErrorKind, Write};
+use std::mem::DropGuard;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -124,10 +125,7 @@ impl PrinterInfo {
                 return true;
             }
         }
-        if self.browser_print_uid().eq_ignore_ascii_case(q) {
-            return true;
-        }
-        false
+        self.browser_print_uid().eq_ignore_ascii_case(q)
     }
 
     /// Stable uid used by Browser Print `/write` and `/read`.
@@ -548,35 +546,34 @@ pub fn save_config(app_data_dir: &Path, config: &AppConfig) -> Result<(), String
         }
     };
 
-    let write_result = temp_file
-        .write_all(json.as_bytes())
-        .and_then(|_| temp_file.sync_all());
-    drop(temp_file);
-    if let Err(err) = write_result {
+    // Remove the temp file on any early exit (error or panic) until rename succeeds.
+    let temp_path = DropGuard::new(temp_path, |temp_path| {
         if let Err(cleanup_err) = fs::remove_file(&temp_path) {
             tracing::warn!(
                 "Failed to remove temporary configuration file {}: {cleanup_err}",
                 temp_path.display()
             );
         }
+    });
+
+    let write_result = temp_file
+        .write_all(json.as_bytes())
+        .and_then(|_| temp_file.sync_all());
+    drop(temp_file);
+    if let Err(err) = write_result {
         return Err(format!(
             "Failed to write temporary configuration file {}: {err}",
             temp_path.display()
         ));
     }
 
-    if let Err(err) = fs::rename(&temp_path, &path) {
-        if let Err(cleanup_err) = fs::remove_file(&temp_path) {
-            tracing::warn!(
-                "Failed to remove temporary configuration file {}: {cleanup_err}",
-                temp_path.display()
-            );
-        }
+    if let Err(err) = fs::rename(&*temp_path, &path) {
         return Err(format!(
             "Failed to replace configuration file {}: {err}",
             path.display()
         ));
     }
+    DropGuard::dismiss(temp_path);
     Ok(())
 }
 
