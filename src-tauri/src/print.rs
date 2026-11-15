@@ -771,8 +771,25 @@ pub fn get_printer_status(printer: &PrinterInfo) -> PrinterStatus {
                     }
                     Err(e2) => {
                         status.status = "offline".into();
+                        let timed_out = |err: &std::io::Error| {
+                            err.kind() == std::io::ErrorKind::TimedOut
+                                || err.to_string().to_ascii_lowercase().contains("timed out")
+                        };
+                        let reason = if timed_out(&e) && timed_out(&e2) {
+                            format!(
+                                "Connection timeout on both port {} and {}",
+                                printer.print_port, config_port
+                            )
+                        } else {
+                            format!(
+                                "Connection failed on both port {} and {}",
+                                printer.print_port, config_port
+                            )
+                        };
                         status.detail = Some(format!(
-                            "{print_err}. HTTP :{config_port} also failed: {e2}. {hint}",
+                            "{}. {}. {hint}",
+                            printer.address,
+                            reason,
                             hint = network_access_hint()
                         ));
                         status.error_messages.push(print_err);

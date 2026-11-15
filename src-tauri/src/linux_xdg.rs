@@ -21,45 +21,7 @@ const ICON_128: &[u8] = include_bytes!("../icons/128x128.png");
 const ICON_256: &[u8] = include_bytes!("../icons/128x128@2x.png");
 const ICON_512: &[u8] = include_bytes!("../icons/icon.png");
 
-/// Write/update `~/.local/share/{applications,icons}` for dock/launcher matching.
-pub fn ensure_desktop_integration() -> io::Result<()> {
-    let data_home = xdg_data_home();
-    let hicolor = data_home.join("icons/hicolor");
-    ensure_hicolor_index(&hicolor)?;
-    install_icons(&hicolor)?;
-    install_desktop_file(&data_home.join("applications"))?;
-    // Drop a mistaken GTK-app-id desktop filename if an earlier attempt created it.
-    let _ = fs::remove_file(
-        data_home
-            .join("applications")
-            .join("se.rawlabelprint.desktop.desktop"),
-    );
-    refresh_caches(&data_home);
-    Ok(())
-}
-
-fn xdg_data_home() -> PathBuf {
-    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    dirs_fallback_home().join(".local/share")
-}
-
-fn dirs_fallback_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-}
-
-fn ensure_hicolor_index(hicolor: &Path) -> io::Result<()> {
-    fs::create_dir_all(hicolor)?;
-    // cosmic-launcher (Alt-Tab) resolves Icon= via the Cosmic→hicolor theme chain and
-    // needs a valid index.theme under the user hicolor tree.
-    write_if_changed(
-        &hicolor.join("index.theme"),
-        b"\
+const HICOLOR_INDEX: &[u8] = b"\
 [Icon Theme]
 Name=Hicolor
 Comment=Fallback icon theme
@@ -89,11 +51,59 @@ Type=Fixed
 Size=512
 Context=Apps
 Type=Fixed
-",
-    )
+";
+
+/// Write/update `~/.local/share/{applications,icons}` for dock/launcher matching.
+pub fn ensure_desktop_integration() -> io::Result<()> {
+    let data_home = xdg_data_home();
+    let hicolor = data_home.join("icons/hicolor");
+    let mut changed = ensure_hicolor_index(&hicolor)?;
+    changed |= install_icons(&hicolor)?;
+    changed |= install_desktop_file(&data_home.join("applications"))?;
+    // Drop a mistaken GTK-app-id desktop filename if an earlier attempt created it.
+    let stale = data_home
+        .join("applications")
+        .join("se.rawlabelprint.desktop.desktop");
+    if fs::remove_file(&stale).is_ok() {
+        changed = true;
+    }
+    if changed {
+        refresh_caches(&data_home);
+    }
+    Ok(())
 }
 
-fn install_icons(hicolor: &Path) -> io::Result<()> {
+fn xdg_data_home() -> PathBuf {
+    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    dirs_fallback_home().join(".local/share")
+}
+
+fn dirs_fallback_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+/// Create a minimal user hicolor index only when missing; never overwrite an
+/// existing theme definition that may list other apps' directories.
+fn ensure_hicolor_index(hicolor: &Path) -> io::Result<bool> {
+    fs::create_dir_all(hicolor)?;
+    let path = hicolor.join("index.theme");
+    if path.is_file() {
+        return Ok(false);
+    }
+    // cosmic-launcher (Alt-Tab) resolves Icon= via the Cosmic→hicolor theme chain and
+    // needs a valid index.theme under the user hicolor tree.
+    fs::write(&path, HICOLOR_INDEX)?;
+    Ok(true)
+}
+
+fn install_icons(hicolor: &Path) -> io::Result<bool> {
+    let mut changed = false;
     for (size, bytes) in [
         ("32x32", ICON_32),
         ("64x64", ICON_64),
@@ -104,12 +114,12 @@ fn install_icons(hicolor: &Path) -> io::Result<()> {
         let dir = hicolor.join(size).join("apps");
         fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{ICON_NAME}.png"));
-        write_if_changed(&path, bytes)?;
+        changed |= write_if_changed(&path, bytes)?;
     }
-    Ok(())
+    Ok(changed)
 }
 
-fn install_desktop_file(applications: &Path) -> io::Result<()> {
+fn install_desktop_file(applications: &Path) -> io::Result<bool> {
     fs::create_dir_all(applications)?;
     let path = applications.join(format!("{APP_ID}.desktop"));
     let exec = resolve_exec();
@@ -128,8 +138,7 @@ Categories=Utility;
 StartupWMClass={APP_ID}
 "
     );
-    write_if_changed(&path, contents.as_bytes())?;
-    Ok(())
+    write_if_changed(&path, contents.as_bytes())
 }
 
 fn resolve_exec() -> String {
@@ -154,15 +163,17 @@ fn quote_desktop_arg(value: &str) -> String {
     }
 }
 
-fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// Returns `true` when the file was written.
+fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<bool> {
     if path.is_file() {
         if let Ok(existing) = fs::read(path) {
             if existing == bytes {
-                return Ok(());
+                return Ok(false);
             }
         }
     }
-    fs::write(path, bytes)
+    fs::write(path, bytes)?;
+    Ok(true)
 }
 
 fn refresh_caches(data_home: &Path) {

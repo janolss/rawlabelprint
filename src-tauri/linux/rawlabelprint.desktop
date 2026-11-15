@@ -4,7 +4,7 @@ Categories={{categories}}
 Comment={{comment}}
 {{/if}}
 Exec={{exec}}
-StartupWMClass={{exec}}
+StartupWMClass=rawlabelprint
 Icon={{icon}}
 Name={{name}}
 Terminal=false
