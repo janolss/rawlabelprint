@@ -4,7 +4,7 @@ use crate::http_server::origin::list_pending;
 use crate::print::get_printer_status;
 use crate::state::AppState;
 use crate::tray_icon::{self, PlatformStyle, TrayKind};
-use crate::update_check::{UpdateState, TRAY_ID};
+use crate::update_check::{TRAY_ID, UpdateState};
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -325,8 +325,13 @@ fn sync_optional_item(
                 *item = Some(created);
             }
         }
-    } else if let Some(existing) = item.take() {
-        let _ = menu.remove(&existing);
+    } else {
+        match item.take() {
+            Some(existing) => {
+                let _ = menu.remove(&existing);
+            }
+            _ => {}
+        }
     }
     Ok(())
 }

@@ -1,12 +1,12 @@
-use crate::config::{save_config, AppConfig, Connection, PrinterInfo};
+use crate::config::{AppConfig, Connection, PrinterInfo, save_config};
 use crate::http_server::{
-    start_http_server, HttpServerHandle, HttpSharedState, PendingOrigins, MAX_CONCURRENT_DEVICE_IO,
+    HttpServerHandle, HttpSharedState, MAX_CONCURRENT_DEVICE_IO, PendingOrigins, start_http_server,
 };
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore, broadcast};
 
 pub struct AppState {
     pub app_data_dir: PathBuf,

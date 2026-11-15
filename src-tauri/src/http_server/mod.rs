@@ -12,10 +12,10 @@ pub(crate) mod test_util;
 use crate::config::{AppConfig, Connection, PrinterInfo};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
+use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{any, get, post};
-use axum::Router;
 use browser_print::{
     handle_available, handle_bp_config, handle_convert, handle_convert_scan, handle_default,
     handle_read, handle_write,
@@ -27,7 +27,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, oneshot, Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore, broadcast, oneshot};
 
 /// Max HTTP request body size (simple API, /write, /convert, …).
 pub const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
@@ -69,7 +69,8 @@ pub struct HttpServerHandle {
 impl HttpServerHandle {
     pub async fn stop(&self) {
         let mut guard = self.shutdown.lock().await;
-        if let Some(tx) = guard.take() {
+        let tx = guard.take();
+        if let Some(tx) = tx {
             let _ = tx.send(());
         }
     }

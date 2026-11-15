@@ -1280,10 +1280,11 @@ mod tests {
         pool.write("virtual:Preview", "", &printer, b"SESS")
             .unwrap();
         assert!(std::fs::read(&capture).unwrap().ends_with(b"SESS"));
-        assert!(pool
-            .read("virtual:Preview", "", &printer)
-            .unwrap()
-            .is_empty());
+        assert!(
+            pool.read("virtual:Preview", "", &printer)
+                .unwrap()
+                .is_empty()
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

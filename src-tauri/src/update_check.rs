@@ -3,8 +3,8 @@
 //! `tauri-plugin-updater` and install it when the user chooses to restart.
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::{AppHandle, Emitter, Manager, Wry};
@@ -100,7 +100,9 @@ fn fetch_latest() -> Result<GithubRelease, String> {
         .timeout_global(Some(REQUEST_TIMEOUT))
         .build()
         .into();
-    agent
+    // Bind the response so its temporary (and the `agent` it borrows through)
+    // is dropped at the statement boundary, matching Rust 2024 drop order.
+    let result = agent
         .get(LATEST_RELEASE_API)
         .header(
             "User-Agent",
@@ -111,7 +113,8 @@ fn fetch_latest() -> Result<GithubRelease, String> {
         .map_err(|err| format!("Update check failed: {err}"))?
         .body_mut()
         .read_json::<GithubRelease>()
-        .map_err(|err| format!("Invalid release response: {err}"))
+        .map_err(|err| format!("Invalid release response: {err}"));
+    result
 }
 
 /// `major.minor.patch` with optional leading `v`; pre-release/build suffixes are ignored

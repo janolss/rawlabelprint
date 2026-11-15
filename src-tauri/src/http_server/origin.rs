@@ -9,10 +9,10 @@
 //! (curl/scripts) are allowed only when Settings enables local scripts.
 //! Browser origins must be approved once in Settings.
 
-use crate::http_server::response::{json_err_code, ORIGIN_DENIED};
 use crate::http_server::HttpSharedState;
+use crate::http_server::response::{ORIGIN_DENIED, json_err_code};
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use std::time::{Duration, Instant};
@@ -240,9 +240,11 @@ mod tests {
     #[tokio::test]
     async fn missing_origin_is_allowed_when_local_scripts_enabled() {
         let state = test_state(true, None);
-        assert!(ensure_origin_allowed(&state, &HeaderMap::new())
-            .await
-            .is_ok());
+        assert!(
+            ensure_origin_allowed(&state, &HeaderMap::new())
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -300,9 +302,11 @@ mod tests {
         let state = test_state(true, None);
         for index in 0..MAX_PENDING_ORIGINS {
             let origin = format!("https://{index}.test");
-            assert!(ensure_origin_allowed(&state, &headers_with_origin(&origin))
-                .await
-                .is_err());
+            assert!(
+                ensure_origin_allowed(&state, &headers_with_origin(&origin))
+                    .await
+                    .is_err()
+            );
         }
 
         let overflow = "https://overflow.test";
@@ -475,10 +479,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        assert!(response
-            .headers()
-            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-            .is_none());
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none()
+        );
     }
 
     #[tokio::test]

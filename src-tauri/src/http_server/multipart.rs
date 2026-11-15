@@ -1,6 +1,6 @@
 use crate::http_server::fetch::find_header_end;
 use crate::http_server::resolve::BrowserDeviceRef;
-use axum::http::{header, HeaderMap};
+use axum::http::{HeaderMap, header};
 use serde::Deserialize;
 use std::collections::HashMap;
 

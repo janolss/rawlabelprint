@@ -5,7 +5,7 @@
 
 #![cfg(target_os = "macos")]
 
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::time::{Duration, Instant};
@@ -28,7 +28,7 @@ type DNSServiceBrowseReply = Option<
 >;
 
 #[link(name = "System")]
-extern "C" {
+unsafe extern "C" {
     fn DNSServiceBrowse(
         sd_ref: *mut DNSServiceRef,
         flags: DNSServiceFlags,

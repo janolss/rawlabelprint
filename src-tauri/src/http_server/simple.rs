@@ -1,12 +1,12 @@
+use crate::http_server::HttpSharedState;
 use crate::http_server::resolve::{list_printers_json, resolve_printer};
 use crate::http_server::response::{
-    error_json, json_ok, public_print_error, DEVICE_NOT_FOUND, PRINTER_UNREACHABLE,
+    DEVICE_NOT_FOUND, PRINTER_UNREACHABLE, error_json, json_ok, public_print_error,
 };
-use crate::http_server::HttpSharedState;
 use crate::print::send_raw_to_printer;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::{header, Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::json;

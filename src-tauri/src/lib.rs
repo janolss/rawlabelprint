@@ -16,11 +16,11 @@ mod update_check;
 mod usb_discovery;
 
 use config::{
-    import_printer_site, load_config, parse_ip_address, require_listen_port,
-    sanitize_listen_address, save_config, AppConfig, Connection, PrinterInfo, ThemePreference,
+    AppConfig, Connection, PrinterInfo, ThemePreference, import_printer_site, load_config,
+    parse_ip_address, require_listen_port, sanitize_listen_address, save_config,
 };
-use http_server::origin::{dismiss_pending, permissions_snapshot, OriginPermissions};
-use print::{get_printer_sgd_info, get_printer_status, PrinterInfoRow, PrinterStatus};
+use http_server::origin::{OriginPermissions, dismiss_pending, permissions_snapshot};
+use print::{PrinterInfoRow, PrinterStatus, get_printer_sgd_info, get_printer_status};
 use print_log::PrintLogSummary;
 use state::AppState;
 use std::path::{Path, PathBuf};
@@ -497,7 +497,8 @@ fn apply_settings_window_theme(app: &AppHandle, preference: ThemePreference) {
         ThemePreference::Light => Some(Theme::Light),
         ThemePreference::Dark => Some(Theme::Dark),
     };
-    if let Err(err) = window.set_theme(theme) {
+    let result = window.set_theme(theme);
+    if let Err(err) = result {
         tracing::warn!("Failed to set settings window theme: {err}");
     }
 }
