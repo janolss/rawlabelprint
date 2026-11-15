@@ -3,6 +3,8 @@ mod discovery;
 mod http_server;
 #[cfg(target_os = "linux")]
 mod linux_tray;
+#[cfg(target_os = "linux")]
+mod linux_xdg;
 #[cfg(target_os = "macos")]
 mod local_network;
 mod print;
@@ -576,6 +578,12 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_secs(4));
                     let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 });
+            }
+
+            // COSMIC/Wayland resolve dock icons via user XDG dirs, not the AppImage mount.
+            #[cfg(target_os = "linux")]
+            if let Err(err) = linux_xdg::ensure_desktop_integration() {
+                tracing::warn!("Failed to install desktop/icon integration: {err}");
             }
 
             let app_data_dir = app
