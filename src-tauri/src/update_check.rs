@@ -102,19 +102,22 @@ fn fetch_latest() -> Result<GithubRelease, String> {
         .into();
     // Bind the response so its temporary (and the `agent` it borrows through)
     // is dropped at the statement boundary, matching Rust 2024 drop order.
-    let result = agent
-        .get(LATEST_RELEASE_API)
-        .header(
-            "User-Agent",
-            concat!("RawLabelPrint/", env!("CARGO_PKG_VERSION")),
-        )
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|err| format!("Update check failed: {err}"))?
-        .body_mut()
-        .read_json::<GithubRelease>()
-        .map_err(|err| format!("Invalid release response: {err}"));
-    result
+    #[allow(clippy::let_and_return)]
+    {
+        let result = agent
+            .get(LATEST_RELEASE_API)
+            .header(
+                "User-Agent",
+                concat!("RawLabelPrint/", env!("CARGO_PKG_VERSION")),
+            )
+            .header("Accept", "application/vnd.github+json")
+            .call()
+            .map_err(|err| format!("Update check failed: {err}"))?
+            .body_mut()
+            .read_json::<GithubRelease>()
+            .map_err(|err| format!("Invalid release response: {err}"));
+        result
+    }
 }
 
 /// `major.minor.patch` with optional leading `v`; pre-release/build suffixes are ignored

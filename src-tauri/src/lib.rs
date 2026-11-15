@@ -508,10 +508,9 @@ fn getting_started_path(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(bundled) = app
         .path()
         .resolve(GETTING_STARTED_REL, BaseDirectory::Resource)
+        && bundled.is_file()
     {
-        if bundled.is_file() {
-            return Ok(bundled);
-        }
+        return Ok(bundled);
     }
 
     let dev = Path::new(env!("CARGO_MANIFEST_DIR"))

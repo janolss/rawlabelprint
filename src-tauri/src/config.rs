@@ -95,10 +95,10 @@ impl PrinterInfo {
     }
 
     pub fn display_name(&self) -> String {
-        if let Some(name) = &self.name {
-            if !name.trim().is_empty() {
-                return name.clone();
-            }
+        if let Some(name) = &self.name
+            && !name.trim().is_empty()
+        {
+            return name.clone();
         }
         let label = friendly_model_label(&self.model);
         if label.is_empty() {
@@ -120,10 +120,10 @@ impl PrinterInfo {
         if self.display_name().eq_ignore_ascii_case(q) {
             return true;
         }
-        if let Some(name) = &self.name {
-            if name.eq_ignore_ascii_case(q) {
-                return true;
-            }
+        if let Some(name) = &self.name
+            && name.eq_ignore_ascii_case(q)
+        {
+            return true;
         }
         self.browser_print_uid().eq_ignore_ascii_case(q)
     }
@@ -444,15 +444,15 @@ impl AppConfig {
         } else {
             printer.print_port = if print_port == 0 { 9100 } else { print_port };
         }
-        if printer.is_virtual() {
-            if let Some(path) = capture_path {
-                let trimmed = path.trim();
-                printer.capture_path = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                };
-            }
+        if printer.is_virtual()
+            && let Some(path) = capture_path
+        {
+            let trimmed = path.trim();
+            printer.capture_path = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
         }
 
         let was_default = self

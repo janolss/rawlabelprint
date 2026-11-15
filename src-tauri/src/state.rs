@@ -76,10 +76,10 @@ impl AppState {
     ) -> PrinterInfo {
         let config = self.config.read().await;
 
-        if let Some(p) = &config.default_printer {
-            if p.address == entry.printer_address {
-                return p.clone();
-            }
+        if let Some(p) = &config.default_printer
+            && p.address == entry.printer_address
+        {
+            return p.clone();
         }
         if let Some(p) = config
             .added_printers

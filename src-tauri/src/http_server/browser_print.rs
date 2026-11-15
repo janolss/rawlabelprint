@@ -102,10 +102,11 @@ pub(crate) async fn handle_default(
         return empty_ok();
     };
 
-    if let Some(t) = query.device_type.as_deref() {
-        if !t.is_empty() && !t.eq_ignore_ascii_case("printer") {
-            return empty_ok();
-        }
+    if let Some(t) = query.device_type.as_deref()
+        && !t.is_empty()
+        && !t.eq_ignore_ascii_case("printer")
+    {
+        return empty_ok();
     }
 
     json_ok(printer.to_browser_print_device().to_string())

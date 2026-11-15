@@ -127,8 +127,11 @@ async fn fetch_target_with_limits(
         // Bind the awaited result so its temporary is dropped at the statement
         // boundary (Rust 2024 tail-expr drop order), while `_permit` stays held
         // until the closure returns.
-        let result = fetch_url_bytes_inner(&target, max_response_bytes).await;
-        result
+        #[allow(clippy::let_and_return)]
+        {
+            let result = fetch_url_bytes_inner(&target, max_response_bytes).await;
+            result
+        }
     })
     .await
     .map_err(|_| "URL fetch timed out".to_string())?

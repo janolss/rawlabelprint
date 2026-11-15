@@ -199,10 +199,10 @@ fn apply(app: &AppHandle, signals: TraySignals) {
     if let Err(err) = apply_icon(app, &state, kind) {
         tracing::warn!("Failed to set tray icon: {err}");
     }
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        if let Err(err) = tray.set_tooltip(Some(tip)) {
-            tracing::warn!("Failed to set tray tooltip: {err}");
-        }
+    if let Some(tray) = app.tray_by_id(TRAY_ID)
+        && let Err(err) = tray.set_tooltip(Some(tip))
+    {
+        tracing::warn!("Failed to set tray tooltip: {err}");
     }
     if let Err(err) = sync_menu(app, &state, &signals) {
         tracing::warn!("Failed to sync tray status menu: {err}");
@@ -326,11 +326,8 @@ fn sync_optional_item(
             }
         }
     } else {
-        match item.take() {
-            Some(existing) => {
-                let _ = menu.remove(&existing);
-            }
-            _ => {}
+        if let Some(existing) = item.take() {
+            let _ = menu.remove(&existing);
         }
     }
     Ok(())
