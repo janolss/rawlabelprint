@@ -4,7 +4,7 @@ use crate::http_server::origin::list_pending;
 use crate::print::get_printer_status;
 use crate::state::AppState;
 use crate::tray_icon::{self, PlatformStyle, TrayKind};
-use crate::update_check::{UpdateState, TRAY_ID};
+use crate::update_check::{TRAY_ID, UpdateState};
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -199,10 +199,10 @@ fn apply(app: &AppHandle, signals: TraySignals) {
     if let Err(err) = apply_icon(app, &state, kind) {
         tracing::warn!("Failed to set tray icon: {err}");
     }
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        if let Err(err) = tray.set_tooltip(Some(tip)) {
-            tracing::warn!("Failed to set tray tooltip: {err}");
-        }
+    if let Some(tray) = app.tray_by_id(TRAY_ID)
+        && let Err(err) = tray.set_tooltip(Some(tip))
+    {
+        tracing::warn!("Failed to set tray tooltip: {err}");
     }
     if let Err(err) = sync_menu(app, &state, &signals) {
         tracing::warn!("Failed to sync tray status menu: {err}");
@@ -325,8 +325,10 @@ fn sync_optional_item(
                 *item = Some(created);
             }
         }
-    } else if let Some(existing) = item.take() {
-        let _ = menu.remove(&existing);
+    } else {
+        if let Some(existing) = item.take() {
+            let _ = menu.remove(&existing);
+        }
     }
     Ok(())
 }

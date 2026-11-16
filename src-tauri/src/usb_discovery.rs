@@ -31,10 +31,10 @@ pub fn search_zebra_usb_printers() -> Result<Vec<PrinterInfo>, String> {
         serialport::available_ports().map_err(|e| format!("USB serial enumeration failed: {e}"))?;
     let mut out = Vec::new();
     for port in ports {
-        if let SerialPortType::UsbPort(info) = port.port_type {
-            if info.vid == ZEBRA_USB_VID {
-                out.push(from_usb_port(port.port_name, info));
-            }
+        if let SerialPortType::UsbPort(info) = port.port_type
+            && info.vid == ZEBRA_USB_VID
+        {
+            out.push(from_usb_port(port.port_name, info));
         }
     }
     out.sort_by(|a, b| a.address.cmp(&b.address));
@@ -49,15 +49,14 @@ pub fn find_port_path_by_serial(serial: &str) -> Option<String> {
     }
     let ports = serialport::available_ports().ok()?;
     for port in ports {
-        if let SerialPortType::UsbPort(info) = port.port_type {
-            if info.vid == ZEBRA_USB_VID
-                && info
-                    .serial_number
-                    .as_deref()
-                    .is_some_and(|s| s.eq_ignore_ascii_case(serial))
-            {
-                return Some(port.port_name);
-            }
+        if let SerialPortType::UsbPort(info) = port.port_type
+            && info.vid == ZEBRA_USB_VID
+            && info
+                .serial_number
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case(serial))
+        {
+            return Some(port.port_name);
         }
     }
     None
@@ -155,8 +154,8 @@ mod tests {
 
     #[test]
     fn discovery_lock_excludes_overlapping_callers() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
         use std::time::Duration;
 

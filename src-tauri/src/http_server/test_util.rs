@@ -1,11 +1,11 @@
 #![cfg(test)]
 
 use crate::config::{AppConfig, Connection, PrinterInfo};
-use crate::http_server::{build_app_router, HttpSharedState, MAX_CONCURRENT_DEVICE_IO};
+use crate::http_server::{HttpSharedState, MAX_CONCURRENT_DEVICE_IO, build_app_router};
 use crate::print::DeviceSessionPool;
 use crate::print_log::PrintLog;
-use axum::response::Response;
 use axum::Router;
+use axum::response::Response;
 use http_body_util::BodyExt;
 use std::sync::Arc;
 use tokio::net::TcpListener;

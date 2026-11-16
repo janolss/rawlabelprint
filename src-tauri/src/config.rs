@@ -95,10 +95,10 @@ impl PrinterInfo {
     }
 
     pub fn display_name(&self) -> String {
-        if let Some(name) = &self.name {
-            if !name.trim().is_empty() {
-                return name.clone();
-            }
+        if let Some(name) = &self.name
+            && !name.trim().is_empty()
+        {
+            return name.clone();
         }
         let label = friendly_model_label(&self.model);
         if label.is_empty() {
@@ -120,10 +120,10 @@ impl PrinterInfo {
         if self.display_name().eq_ignore_ascii_case(q) {
             return true;
         }
-        if let Some(name) = &self.name {
-            if name.eq_ignore_ascii_case(q) {
-                return true;
-            }
+        if let Some(name) = &self.name
+            && name.eq_ignore_ascii_case(q)
+        {
+            return true;
         }
         self.browser_print_uid().eq_ignore_ascii_case(q)
     }
@@ -444,15 +444,15 @@ impl AppConfig {
         } else {
             printer.print_port = if print_port == 0 { 9100 } else { print_port };
         }
-        if printer.is_virtual() {
-            if let Some(path) = capture_path {
-                let trimmed = path.trim();
-                printer.capture_path = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                };
-            }
+        if printer.is_virtual()
+            && let Some(path) = capture_path
+        {
+            let trimmed = path.trim();
+            printer.capture_path = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
         }
 
         let was_default = self
@@ -882,15 +882,18 @@ mod tests {
         cfg.upsert_printer(sample_printer("10.0.0.1", ""), true);
         cfg.upsert_printer(sample_printer("10.0.0.2", ""), false);
 
-        assert!(cfg
-            .update_printer("9.9.9.9", None, "10.0.0.3".into(), 9100, None)
-            .is_err());
-        assert!(cfg
-            .update_printer("10.0.0.1", None, "10.0.0.2".into(), 9100, None)
-            .is_err());
-        assert!(cfg
-            .update_printer("10.0.0.1", None, "".into(), 9100, None)
-            .is_err());
+        assert!(
+            cfg.update_printer("9.9.9.9", None, "10.0.0.3".into(), 9100, None)
+                .is_err()
+        );
+        assert!(
+            cfg.update_printer("10.0.0.1", None, "10.0.0.2".into(), 9100, None)
+                .is_err()
+        );
+        assert!(
+            cfg.update_printer("10.0.0.1", None, "".into(), 9100, None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -969,9 +972,11 @@ mod tests {
     fn load_config_reports_non_file_read_errors() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(config_path(dir.path())).unwrap();
-        assert!(load_config(dir.path())
-            .unwrap_err()
-            .contains("Failed to read configuration"));
+        assert!(
+            load_config(dir.path())
+                .unwrap_err()
+                .contains("Failed to read configuration")
+        );
     }
 
     #[test]
@@ -1097,10 +1102,12 @@ mod tests {
         let config: AppConfig = serde_json::from_value(example).unwrap();
         assert_eq!(config.port, 9100);
         assert!(!config.allow_local_scripts);
-        assert!(config
-            .added_printers
-            .iter()
-            .any(|printer| printer.is_virtual()));
+        assert!(
+            config
+                .added_printers
+                .iter()
+                .any(|printer| printer.is_virtual())
+        );
         assert_eq!(
             config.allowed_origins,
             vec!["http://127.0.0.1:8080".to_string()]
@@ -1149,14 +1156,18 @@ mod tests {
         assert_eq!(config.denied_origins, vec!["https://blocked.example"]);
         assert_eq!(config.default_printer.as_ref().unwrap().address, "Preview");
         assert!(config.default_printer.as_ref().unwrap().is_virtual());
-        assert!(config
-            .added_printers
-            .iter()
-            .any(|printer| printer.address == "10.0.0.5" && printer.print_port == 9100));
-        assert!(config
-            .added_printers
-            .iter()
-            .any(|printer| printer.address == "Preview"));
+        assert!(
+            config
+                .added_printers
+                .iter()
+                .any(|printer| printer.address == "10.0.0.5" && printer.print_port == 9100)
+        );
+        assert!(
+            config
+                .added_printers
+                .iter()
+                .any(|printer| printer.address == "Preview")
+        );
     }
 
     #[test]

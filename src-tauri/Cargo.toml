@@ -1,10 +1,10 @@
 [package]
 name = "rawlabelprint"
-version = "0.5.10"
+version = "0.5.11"
 description = "Raw label printing tray app for macOS, Linux and Windows (Zebra LAN/USB printers)"
 authors = ["Jan Olsson"]
 license = "MIT"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "rawlabelprint_lib"

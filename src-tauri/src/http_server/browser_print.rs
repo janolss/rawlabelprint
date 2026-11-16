@@ -1,19 +1,19 @@
+use crate::http_server::HttpSharedState;
 use crate::http_server::fetch::fetch_url_bytes;
 use crate::http_server::multipart::{
     multipart_boundary, parse_multipart_parts, parse_write_request,
 };
 use crate::http_server::origin::session_origin;
 use crate::http_server::resolve::{
-    collect_known_printers, resolve_by_device_ref, BrowserDeviceRef,
+    BrowserDeviceRef, collect_known_printers, resolve_by_device_ref,
 };
 use crate::http_server::response::{
-    empty_ok, json_err, json_err_code, json_ok, public_print_error, text_ok, COMPAT_DISABLED,
-    DEVICE_NOT_FOUND, PRINTER_UNREACHABLE,
+    COMPAT_DISABLED, DEVICE_NOT_FOUND, PRINTER_UNREACHABLE, empty_ok, json_err, json_err_code,
+    json_ok, public_print_error, text_ok,
 };
-use crate::http_server::HttpSharedState;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::response::Response;
 use serde::Deserialize;
 use serde_json::json;
@@ -102,10 +102,11 @@ pub(crate) async fn handle_default(
         return empty_ok();
     };
 
-    if let Some(t) = query.device_type.as_deref() {
-        if !t.is_empty() && !t.eq_ignore_ascii_case("printer") {
-            return empty_ok();
-        }
+    if let Some(t) = query.device_type.as_deref()
+        && !t.is_empty()
+        && !t.eq_ignore_ascii_case("printer")
+    {
+        return empty_ok();
     }
 
     json_ok(printer.to_browser_print_device().to_string())

@@ -74,10 +74,10 @@ pub fn ensure_desktop_integration() -> io::Result<()> {
 }
 
 fn xdg_data_home() -> PathBuf {
-    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Ok(dir) = std::env::var("XDG_DATA_HOME")
+        && !dir.is_empty()
+    {
+        return PathBuf::from(dir);
     }
     dirs_fallback_home().join(".local/share")
 }
@@ -165,12 +165,11 @@ fn quote_desktop_arg(value: &str) -> String {
 
 /// Returns `true` when the file was written.
 fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<bool> {
-    if path.is_file() {
-        if let Ok(existing) = fs::read(path) {
-            if existing == bytes {
-                return Ok(false);
-            }
-        }
+    if path.is_file()
+        && let Ok(existing) = fs::read(path)
+        && existing == bytes
+    {
+        return Ok(false);
     }
     fs::write(path, bytes)?;
     Ok(true)

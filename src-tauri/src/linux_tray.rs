@@ -201,11 +201,12 @@ mod tests {
         let image =
             tray_icon::build(TrayKind::Idle, PlatformStyle::Linux { on_dark: true }).unwrap();
         let rgba = image.rgba();
-        assert!(rgba
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|px| px[3] > 0 && px[0] == 255 && px[1] == 255 && px[2] == 255));
+        assert!(
+            rgba.as_chunks::<4>()
+                .0
+                .iter()
+                .any(|px| px[3] > 0 && px[0] == 255 && px[1] == 255 && px[2] == 255)
+        );
         // Still a valid Image so theme watcher can call set_icon.
         let _: &Image<'_> = &image;
     }

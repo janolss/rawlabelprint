@@ -1,6 +1,6 @@
 use crate::http_server::fetch::find_header_end;
 use crate::http_server::resolve::BrowserDeviceRef;
-use axum::http::{header, HeaderMap};
+use axum::http::{HeaderMap, header};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -73,10 +73,10 @@ fn parse_write_multipart(body: &[u8], boundary: &str) -> Result<ParsedWrite, Str
         serde_json::from_slice(json_bytes).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     let mut data = parts.get("blob").cloned().unwrap_or_default();
-    if data.is_empty() {
-        if let Some(d) = meta.data {
-            data = d.into_bytes();
-        }
+    if data.is_empty()
+        && let Some(d) = meta.data
+    {
+        data = d.into_bytes();
     }
 
     Ok(ParsedWrite {

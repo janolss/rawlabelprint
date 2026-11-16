@@ -136,14 +136,13 @@ impl DeviceSessionPool {
         stream: PrinterStream,
         query: Option<usize>,
     ) {
-        if map.len() >= MAX_DEVICE_SESSIONS {
-            if let Some(oldest) = map
+        if map.len() >= MAX_DEVICE_SESSIONS
+            && let Some(oldest) = map
                 .iter()
                 .min_by_key(|(_, session)| session.last_used)
                 .map(|(key, _)| key.clone())
-            {
-                map.remove(&oldest);
-            }
+        {
+            map.remove(&oldest);
         }
         map.insert(
             uid.to_string(),
@@ -363,10 +362,10 @@ fn connect_usb(printer: &PrinterInfo) -> Result<PrinterStream, String> {
     match open_serial_path(&printer.address) {
         Ok(port) => Ok(PrinterStream::Serial(port)),
         Err(first_err) => {
-            if let Some(path) = find_port_path_by_serial(&printer.serial_number) {
-                if path != printer.address {
-                    return open_serial_path(&path).map(PrinterStream::Serial);
-                }
+            if let Some(path) = find_port_path_by_serial(&printer.serial_number)
+                && path != printer.address
+            {
+                return open_serial_path(&path).map(PrinterStream::Serial);
             }
             Err(first_err)
         }
@@ -825,14 +824,14 @@ fn decode_hqes(response: &str) -> (Vec<String>, Vec<String>) {
 
     for line in response.lines() {
         let upper = line.to_uppercase();
-        if upper.contains("ERRORS:") {
-            if let Some(parsed) = extract_hqes_flags(line, "ERRORS:") {
-                push_message(&mut errors, "error", &parsed);
-            }
-        } else if upper.contains("WARNINGS:") {
-            if let Some(parsed) = extract_hqes_flags(line, "WARNINGS:") {
-                push_message(&mut warnings, "warning", &parsed);
-            }
+        if upper.contains("ERRORS:")
+            && let Some(parsed) = extract_hqes_flags(line, "ERRORS:")
+        {
+            push_message(&mut errors, "error", &parsed);
+        } else if upper.contains("WARNINGS:")
+            && let Some(parsed) = extract_hqes_flags(line, "WARNINGS:")
+        {
+            push_message(&mut warnings, "warning", &parsed);
         }
     }
 
@@ -1280,10 +1279,11 @@ mod tests {
         pool.write("virtual:Preview", "", &printer, b"SESS")
             .unwrap();
         assert!(std::fs::read(&capture).unwrap().ends_with(b"SESS"));
-        assert!(pool
-            .read("virtual:Preview", "", &printer)
-            .unwrap()
-            .is_empty());
+        assert!(
+            pool.read("virtual:Preview", "", &printer)
+                .unwrap()
+                .is_empty()
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
